@@ -3,6 +3,29 @@
 import { useRouter } from "next/navigation";
 import type { Match } from "@/lib/db";
 
+function TeamCrest({ src, alt }: { src: string | null; alt: string }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        className="w-8 h-8 object-contain"
+      />
+    );
+  }
+
+  // Placeholder shield icon
+  return (
+    <svg
+      className="w-8 h-8 text-muted/50"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path d="M12 2L3 7v5c0 5.25 3.83 10.15 9 11.25C17.17 22.15 21 17.25 21 12V7l-9-5zm0 2.18l7 3.89v4.93c0 4.29-3.08 8.28-7 9.18-3.92-.9-7-4.89-7-9.18V8.07l7-3.89z" />
+    </svg>
+  );
+}
+
 export default function MatchCard({ match }: { match: Match }) {
   const router = useRouter();
 
@@ -14,33 +37,49 @@ export default function MatchCard({ match }: { match: Match }) {
   }
 
   const dateStr = new Date(match.date).toLocaleDateString("en-GB", {
-    weekday: "short",
+    weekday: "long",
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
   });
 
   return (
-    <div className="bg-slate-800 rounded-xl p-5 border border-slate-700 hover:border-slate-600 transition-colors">
+    <div className="bg-card rounded-xl p-5 border border-card-border hover:border-card-hover transition-colors group">
       <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          {/* Score line */}
-          <div className="flex items-center gap-3 text-lg">
-            <span className={`font-semibold ${match.home_score > match.away_score ? "text-emerald-400" : "text-slate-200"}`}>
-              {match.home_team}
-            </span>
-            <span className="text-2xl font-bold text-white tabular-nums">
+        <div className="flex-1 space-y-3">
+          {/* Descriptive text */}
+          <p className="text-muted text-sm">
+            You watched on <span className="text-slate-300">{dateStr}</span>
+          </p>
+
+          {/* Teams with crests and score */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <TeamCrest src={match.home_crest} alt={match.home_team} />
+              <span className={`font-semibold text-lg truncate ${match.home_score > match.away_score ? "text-accent" : "text-slate-200"}`}>
+                {match.home_team}
+              </span>
+            </div>
+
+            <div className="text-2xl font-bold text-white tabular-nums shrink-0 px-2">
               {match.home_score} - {match.away_score}
-            </span>
-            <span className={`font-semibold ${match.away_score > match.home_score ? "text-emerald-400" : "text-slate-200"}`}>
-              {match.away_team}
-            </span>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-1 min-w-0 justify-end">
+              <span className={`font-semibold text-lg truncate text-right ${match.away_score > match.home_score ? "text-accent" : "text-slate-200"}`}>
+                {match.away_team}
+              </span>
+              <TeamCrest src={match.away_crest} alt={match.away_team} />
+            </div>
           </div>
 
-          {/* Details */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-slate-400">
-            <span>{dateStr}</span>
-            {match.competition && <span>{match.competition}</span>}
+          {/* Metadata */}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+            {match.competition && (
+              <span className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full">
+                {match.competition}
+              </span>
+            )}
             {match.round && <span>{match.round}</span>}
             {match.venue && <span>{match.venue}</span>}
           </div>
@@ -48,7 +87,7 @@ export default function MatchCard({ match }: { match: Match }) {
 
         <button
           onClick={handleDelete}
-          className="text-slate-500 hover:text-red-400 transition-colors p-1"
+          className="text-muted/40 hover:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100"
           aria-label="Delete match"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
