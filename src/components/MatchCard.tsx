@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { Match } from "@/lib/db";
 
 function TeamCrest({ src, alt }: { src: string | null; alt: string }) {
@@ -26,10 +27,22 @@ function TeamCrest({ src, alt }: { src: string | null; alt: string }) {
   );
 }
 
+function getWatchMinutes(match: Match): number {
+  try {
+    const intervals: number[][] = JSON.parse(match.watch_intervals || "[[0,90]]");
+    return intervals.reduce((sum, [s, e]) => sum + (e - s), 0);
+  } catch {
+    return 90;
+  }
+}
+
 export default function MatchCard({ match }: { match: Match }) {
   const router = useRouter();
+  const minutes = getWatchMinutes(match);
 
-  async function handleDelete() {
+  async function handleDelete(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     if (!confirm("Delete this match?")) return;
 
     await fetch(`/api/matches/${match.id}`, { method: "DELETE" });
@@ -44,12 +57,20 @@ export default function MatchCard({ match }: { match: Match }) {
   });
 
   return (
-    <div className="bg-card rounded-xl p-5 border border-card-border hover:border-card-hover transition-colors group">
+    <Link
+      href={`/matches/${match.id}`}
+      className="block bg-card rounded-xl p-5 border border-card-border hover:border-card-hover transition-colors group"
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 space-y-3">
           {/* Descriptive text */}
           <p className="text-muted text-sm">
-            You watched on <span className="text-slate-300">{dateStr}</span>
+            You watched {minutes < 90 ? `${minutes} min` : ""} on <span className="text-slate-300">{dateStr}</span>
+            {minutes < 90 && (
+              <span className="ml-2 inline-flex items-center bg-accent-muted text-accent-dim px-1.5 py-0.5 rounded text-xs tabular-nums">
+                {minutes}&apos;
+              </span>
+            )}
           </p>
 
           {/* Teams with crests and score */}
@@ -95,6 +116,6 @@ export default function MatchCard({ match }: { match: Match }) {
           </svg>
         </button>
       </div>
-    </div>
+    </Link>
   );
 }

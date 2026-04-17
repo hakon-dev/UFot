@@ -2,11 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import WatchIntervalEditor from "@/components/WatchIntervalEditor";
 
 export default function MatchForm() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [watchIntervals, setWatchIntervals] = useState<number[][]>([[0, 90]]);
   const [formData, setFormData] = useState({
     homeTeam: "",
     awayTeam: "",
@@ -31,7 +33,7 @@ export default function MatchForm() {
     await fetch("/api/matches", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(formData),
+      body: JSON.stringify({ ...formData, watchIntervals }),
     });
 
     router.push("/");
@@ -116,6 +118,15 @@ export default function MatchForm() {
                 <input id="venue" name="venue" className={inputClass} placeholder="e.g. Anfield" value={formData.venue} onChange={handleChange} />
               </div>
             </div>
+          </div>
+
+          {/* Watch Intervals */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-white">Watch Intervals</h3>
+            <WatchIntervalEditor
+              intervals={watchIntervals}
+              onChange={setWatchIntervals}
+            />
           </div>
 
           <button

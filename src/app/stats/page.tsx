@@ -1,14 +1,13 @@
-import { getAllMatches } from "@/lib/db";
+import { getAllMatches, getMatchesWithDetails } from "@/lib/db";
+import { computePlayerStats } from "@/lib/player-stats";
+import PlayerStatsTable from "./PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
 
 interface TeamRecord {
   team: string;
   crest: string | null;
-  played: number;
-  wins: number;
-  draws: number;
-  losses: number;
+  minutes: number;
 }
 
 export default function StatsPage() {
@@ -16,6 +15,21 @@ export default function StatsPage() {
 
   const totalMatches = matches.length;
   const totalGoals = matches.reduce((sum, m) => sum + m.home_score + m.away_score, 0);
+
+  // Watch minutes calculation
+  const totalMinutesWatched = matches.reduce((sum, m) => {
+    try {
+      const intervals: number[][] = JSON.parse(m.watch_intervals || "[[0,90]]");
+      return sum + intervals.reduce((s, [a, b]) => s + (b - a), 0);
+    } catch {
+      return sum + 90;
+    }
+  }, 0);
+  const equivalentMatches = totalMinutesWatched / 90;
+
+  // Player stats
+  const matchesWithDetails = getMatchesWithDetails();
+  const playerStats = computePlayerStats(matchesWithDetails);
 
   // Matches per competition
   const competitionCounts: Record<string, number> = {};
@@ -26,38 +40,34 @@ export default function StatsPage() {
   const competitions = Object.entries(competitionCounts)
     .sort((a, b) => b[1] - a[1]);
 
-  // Team records with crest lookup
+  // Team records: equivalent matches watched per team
   const teamRecords: Record<string, TeamRecord> = {};
   function ensureTeam(name: string, crest: string | null) {
     if (!teamRecords[name]) {
-      teamRecords[name] = { team: name, crest, played: 0, wins: 0, draws: 0, losses: 0 };
+      teamRecords[name] = { team: name, crest, minutes: 0 };
     } else if (!teamRecords[name].crest && crest) {
       teamRecords[name].crest = crest;
     }
   }
 
   for (const m of matches) {
+    let matchMinutes: number;
+    try {
+      const intervals: number[][] = JSON.parse(m.watch_intervals || "[[0,90]]");
+      matchMinutes = intervals.reduce((s, [a, b]) => s + (b - a), 0);
+    } catch {
+      matchMinutes = 90;
+    }
+
     ensureTeam(m.home_team, m.home_crest);
     ensureTeam(m.away_team, m.away_crest);
 
-    teamRecords[m.home_team].played++;
-    teamRecords[m.away_team].played++;
-
-    if (m.home_score > m.away_score) {
-      teamRecords[m.home_team].wins++;
-      teamRecords[m.away_team].losses++;
-    } else if (m.away_score > m.home_score) {
-      teamRecords[m.away_team].wins++;
-      teamRecords[m.home_team].losses++;
-    } else {
-      teamRecords[m.home_team].draws++;
-      teamRecords[m.away_team].draws++;
-    }
+    teamRecords[m.home_team].minutes += matchMinutes;
+    teamRecords[m.away_team].minutes += matchMinutes;
   }
 
   const topTeams = Object.values(teamRecords)
-    .sort((a, b) => b.played - a.played)
-    .slice(0, 10);
+    .sort((a, b) => b.minutes - a.minutes);
 
   const cardClass = "bg-card rounded-xl p-6 border border-card-border";
 
@@ -72,10 +82,18 @@ export default function StatsPage() {
       ) : (
         <div className="space-y-6">
           {/* Overview */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
             <div className={cardClass}>
               <p className="text-sm text-muted">Matches Watched</p>
               <p className="text-3xl font-bold text-accent mt-1">{totalMatches}</p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-sm text-muted">Equivalent Matches</p>
+              <p className="text-3xl font-bold text-accent mt-1">{equivalentMatches.toFixed(1)}</p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-sm text-muted">Total Minutes</p>
+              <p className="text-3xl font-bold text-accent mt-1">{totalMinutesWatched.toLocaleString()}</p>
             </div>
             <div className={cardClass}>
               <p className="text-sm text-muted">Total Goals Seen</p>
@@ -120,10 +138,7 @@ export default function StatsPage() {
                 <thead>
                   <tr className="text-muted border-b border-card-border">
                     <th className="text-left pb-3 font-medium">Team</th>
-                    <th className="text-center pb-3 font-medium">P</th>
-                    <th className="text-center pb-3 font-medium">W</th>
-                    <th className="text-center pb-3 font-medium">D</th>
-                    <th className="text-center pb-3 font-medium">L</th>
+                    <th className="text-right pb-3 font-medium">Eq. Matches</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -141,16 +156,21 @@ export default function StatsPage() {
                           {t.team}
                         </div>
                       </td>
-                      <td className="py-2.5 text-center text-slate-300">{t.played}</td>
-                      <td className="py-2.5 text-center text-accent">{t.wins}</td>
-                      <td className="py-2.5 text-center text-muted">{t.draws}</td>
-                      <td className="py-2.5 text-center text-red-400">{t.losses}</td>
+                      <td className="py-2.5 text-right text-accent tabular-nums">{(t.minutes / 90).toFixed(1)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {/* Player Watch Stats */}
+          {playerStats.length > 0 && (
+            <div className={cardClass}>
+              <h2 className="text-lg font-semibold text-white mb-4">Player Watch Stats</h2>
+              <PlayerStatsTable players={playerStats} />
+            </div>
+          )}
         </div>
       )}
     </div>

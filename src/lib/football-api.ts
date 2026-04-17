@@ -107,6 +107,118 @@ function shiftDate(date: string, days: number): string {
   return d.toISOString().split("T")[0];
 }
 
+// Types for match detail response from /v4/matches/{id}
+interface FootballDataPlayer {
+  id: number;
+  name: string;
+  position: string | null;
+  shirtNumber: number | null;
+}
+
+interface FootballDataGoal {
+  minute: number;
+  injuryTime: number | null;
+  type: string; // REGULAR, OWN_GOAL, PENALTY
+  team: { id: number; name: string };
+  scorer: FootballDataPlayer;
+  assist: FootballDataPlayer | null;
+}
+
+interface FootballDataSubstitution {
+  minute: number;
+  team: { id: number; name: string };
+  playerOut: FootballDataPlayer;
+  playerIn: FootballDataPlayer;
+}
+
+interface FootballDataDetailResponse {
+  id: number;
+  homeTeam: {
+    id: number;
+    name: string;
+    lineup: FootballDataPlayer[];
+    bench: FootballDataPlayer[];
+  };
+  awayTeam: {
+    id: number;
+    name: string;
+    lineup: FootballDataPlayer[];
+    bench: FootballDataPlayer[];
+  };
+  goals: FootballDataGoal[];
+  substitutions: FootballDataSubstitution[];
+}
+
+export interface MatchDetailResult {
+  goals: Array<{
+    minute: number;
+    team: string;
+    scorerName: string;
+    assistName: string | null;
+    type: string;
+  }>;
+  substitutions: Array<{
+    minute: number;
+    team: string;
+    playerOut: string;
+    playerIn: string;
+  }>;
+  homeLineup: Array<{ name: string; position: string | null; shirtNumber: number | null; isStarter: boolean }>;
+  awayLineup: Array<{ name: string; position: string | null; shirtNumber: number | null; isStarter: boolean }>;
+}
+
+export async function fetchMatchDetails(matchId: number): Promise<MatchDetailResult> {
+  const res = await fetchApi(`/matches/${matchId}`);
+  if (!res.ok) {
+    throw new Error(`football-data.org API error: ${res.status}`);
+  }
+  const data: FootballDataDetailResponse = await res.json();
+
+  return {
+    goals: (data.goals ?? []).map((g) => ({
+      minute: g.minute,
+      team: g.team.name,
+      scorerName: g.scorer.name,
+      assistName: g.assist?.name ?? null,
+      type: g.type,
+    })),
+    substitutions: (data.substitutions ?? []).map((s) => ({
+      minute: s.minute,
+      team: s.team.name,
+      playerOut: s.playerOut.name,
+      playerIn: s.playerIn.name,
+    })),
+    homeLineup: [
+      ...(data.homeTeam.lineup ?? []).map((p) => ({
+        name: p.name,
+        position: p.position,
+        shirtNumber: p.shirtNumber,
+        isStarter: true,
+      })),
+      ...(data.homeTeam.bench ?? []).map((p) => ({
+        name: p.name,
+        position: p.position,
+        shirtNumber: p.shirtNumber,
+        isStarter: false,
+      })),
+    ],
+    awayLineup: [
+      ...(data.awayTeam.lineup ?? []).map((p) => ({
+        name: p.name,
+        position: p.position,
+        shirtNumber: p.shirtNumber,
+        isStarter: true,
+      })),
+      ...(data.awayTeam.bench ?? []).map((p) => ({
+        name: p.name,
+        position: p.position,
+        shirtNumber: p.shirtNumber,
+        isStarter: false,
+      })),
+    ],
+  };
+}
+
 export async function searchMatchesByDate(
   dateFrom: string,
   dateTo: string,

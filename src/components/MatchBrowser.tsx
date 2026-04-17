@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { getCompetitionSortKey } from "@/lib/competition-order";
+import WatchIntervalEditor from "@/components/WatchIntervalEditor";
 
 interface MatchSearchResult {
   id: number;
@@ -61,7 +62,11 @@ export default function MatchBrowser() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
+  // Map football_data_id -> internal match id (for interval editing)
+  const [addedMatchIds, setAddedMatchIds] = useState<Map<number, string>>(new Map());
   const [addingId, setAddingId] = useState<number | null>(null);
+  const [editingIntervalsId, setEditingIntervalsId] = useState<number | null>(null);
+  const [intervals, setIntervals] = useState<Map<number, number[][]>>(new Map());
 
   const fetchMatches = useCallback(async (d: string) => {
     setLoading(true);
@@ -108,10 +113,15 @@ export default function MatchBrowser() {
           venue: match.venue,
           homeCrest: match.homeCrest,
           awayCrest: match.awayCrest,
+          footballDataId: match.id,
         }),
       });
       if (res.ok) {
+        const created = await res.json();
         setAddedIds((prev) => new Set(prev).add(match.id));
+        setAddedMatchIds((prev) => new Map(prev).set(match.id, created.id));
+        setIntervals((prev) => new Map(prev).set(match.id, [[0, 90]]));
+        setEditingIntervalsId(match.id);
       }
     } finally {
       setAddingId(null);
@@ -181,85 +191,101 @@ export default function MatchBrowser() {
             {group.matches.map((match) => {
               const added = addedIds.has(match.id);
               const adding = addingId === match.id;
+              const showIntervals = editingIntervalsId === match.id;
+              const matchIntervals = intervals.get(match.id) ?? [[0, 90]];
+              const internalId = addedMatchIds.get(match.id);
 
               return (
-                <button
-                  key={match.id}
-                  type="button"
-                  onClick={() => handleAdd(match)}
-                  disabled={added || adding}
-                  className={`w-full text-left rounded-lg p-3 transition-colors border ${
-                    added
-                      ? "bg-surface/30 border-accent/30 opacity-60"
-                      : "bg-surface/50 hover:bg-card-hover border-card-border hover:border-accent/30 cursor-pointer"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    {/* Home team */}
-                    <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
-                      <span className="text-sm text-white truncate text-right">
-                        {match.homeTeam}
-                      </span>
-                      {match.homeCrest ? (
-                        <img
-                          src={match.homeCrest}
-                          alt=""
-                          className="w-6 h-6 object-contain shrink-0"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                      ) : (
-                        <div className="w-6 h-6 shrink-0" />
-                      )}
+                <div key={match.id}>
+                  <button
+                    type="button"
+                    onClick={() => added ? setEditingIntervalsId(showIntervals ? null : match.id) : handleAdd(match)}
+                    disabled={adding}
+                    className={`w-full text-left rounded-lg p-3 transition-colors border ${
+                      added
+                        ? "bg-surface/30 border-accent/30 cursor-pointer"
+                        : "bg-surface/50 hover:bg-card-hover border-card-border hover:border-accent/30 cursor-pointer"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {/* Home team */}
+                      <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+                        <span className="text-sm text-white truncate text-right">
+                          {match.homeTeam}
+                        </span>
+                        {match.homeCrest ? (
+                          <img
+                            src={match.homeCrest}
+                            alt=""
+                            className="w-6 h-6 object-contain shrink-0"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : (
+                          <div className="w-6 h-6 shrink-0" />
+                        )}
+                      </div>
+
+                      {/* Score */}
+                      <div className="text-white font-bold tabular-nums shrink-0 w-14 text-center">
+                        {match.homeScore ?? "-"} - {match.awayScore ?? "-"}
+                      </div>
+
+                      {/* Away team */}
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        {match.awayCrest ? (
+                          <img
+                            src={match.awayCrest}
+                            alt=""
+                            className="w-6 h-6 object-contain shrink-0"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : (
+                          <div className="w-6 h-6 shrink-0" />
+                        )}
+                        <span className="text-sm text-white truncate">
+                          {match.awayTeam}
+                        </span>
+                      </div>
+
+                      {/* Add indicator */}
+                      <div className="shrink-0 w-6 h-6 flex items-center justify-center">
+                        {adding ? (
+                          <svg className="animate-spin h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : added ? (
+                          <svg className="h-5 w-5 text-accent" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        ) : (
+                          <svg className="h-5 w-5 text-muted/50" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Score */}
-                    <div className="text-white font-bold tabular-nums shrink-0 w-14 text-center">
-                      {match.homeScore ?? "-"} - {match.awayScore ?? "-"}
-                    </div>
+                    {/* Round / venue info */}
+                    {(match.round || match.venue) && (
+                      <div className="text-xs text-muted mt-1 pl-1">
+                        {[match.round, match.venue].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                  </button>
 
-                    {/* Away team */}
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      {match.awayCrest ? (
-                        <img
-                          src={match.awayCrest}
-                          alt=""
-                          className="w-6 h-6 object-contain shrink-0"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                      ) : (
-                        <div className="w-6 h-6 shrink-0" />
-                      )}
-                      <span className="text-sm text-white truncate">
-                        {match.awayTeam}
-                      </span>
-                    </div>
-
-                    {/* Add indicator */}
-                    <div className="shrink-0 w-6 h-6 flex items-center justify-center">
-                      {adding ? (
-                        <svg className="animate-spin h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                      ) : added ? (
-                        <svg className="h-5 w-5 text-accent" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      ) : (
-                        <svg className="h-5 w-5 text-muted/50" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-                        </svg>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Round / venue info */}
-                  {(match.round || match.venue) && (
-                    <div className="text-xs text-muted mt-1 pl-1">
-                      {[match.round, match.venue].filter(Boolean).join(" · ")}
+                  {/* Interval editor shown after adding */}
+                  {showIntervals && internalId && (
+                    <div className="mt-1.5 p-3 bg-surface/30 rounded-lg border border-card-border">
+                      <p className="text-xs text-muted mb-2">How much did you watch?</p>
+                      <WatchIntervalEditor
+                        intervals={matchIntervals}
+                        onChange={(next) => setIntervals((prev) => new Map(prev).set(match.id, next))}
+                        matchId={internalId}
+                      />
                     </div>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>

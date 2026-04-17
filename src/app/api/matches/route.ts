@@ -20,6 +20,8 @@ export async function POST(request: NextRequest) {
     venue: body.venue || undefined,
     homeCrest: body.homeCrest || undefined,
     awayCrest: body.awayCrest || undefined,
+    footballDataId: body.footballDataId || undefined,
+    watchIntervals: body.watchIntervals || undefined,
   });
 
   return NextResponse.json(match, { status: 201 });
