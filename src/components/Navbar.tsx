@@ -13,10 +13,10 @@ export default function Navbar() {
   const pathname = usePathname();
 
   return (
-    <nav className="bg-slate-800 border-b border-slate-700">
+    <nav className="bg-card border-b border-card-border">
       <div className="max-w-5xl mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          <Link href="/" className="text-xl font-bold text-emerald-400">
+          <Link href="/" className="text-xl font-bold text-accent">
             UFot
           </Link>
           <div className="flex gap-1">
@@ -28,8 +28,8 @@ export default function Navbar() {
                   href={link.href}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     isActive
-                      ? "bg-emerald-600 text-white"
-                      : "text-slate-300 hover:bg-slate-700 hover:text-white"
+                      ? "bg-accent text-black"
+                      : "text-muted hover:bg-surface hover:text-white"
                   }`}
                 >
                   {link.label}

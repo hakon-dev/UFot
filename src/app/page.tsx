@@ -13,7 +13,7 @@ export default function Home() {
         <h1 className="text-2xl font-bold text-white">Match Feed</h1>
         <Link
           href="/add"
-          className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-4 py-2 rounded-lg transition-colors"
+          className="bg-accent hover:bg-accent-dim text-black font-medium px-4 py-2 rounded-lg transition-colors"
         >
           + Add Match
         </Link>
@@ -21,8 +21,8 @@ export default function Home() {
 
       {matches.length === 0 ? (
         <div className="text-center py-16">
-          <p className="text-slate-400 text-lg">No matches watched yet.</p>
-          <Link href="/add" className="text-emerald-400 hover:text-emerald-300 mt-2 inline-block">
+          <p className="text-muted text-lg">No matches watched yet.</p>
+          <Link href="/add" className="text-accent hover:text-accent-dim mt-2 inline-block">
             Add your first match
           </Link>
         </div>

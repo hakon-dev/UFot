@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
     round: body.round || undefined,
     date: body.date,
     venue: body.venue || undefined,
+    homeCrest: body.homeCrest || undefined,
+    awayCrest: body.awayCrest || undefined,
   });
 
   return NextResponse.json(match, { status: 201 });

@@ -24,6 +24,16 @@ db.exec(`
   )
 `);
 
+// Migration: add crest columns if they don't exist
+const columns = db.prepare("PRAGMA table_info(matches)").all() as { name: string }[];
+const columnNames = columns.map((c) => c.name);
+if (!columnNames.includes("home_crest")) {
+  db.exec("ALTER TABLE matches ADD COLUMN home_crest TEXT");
+}
+if (!columnNames.includes("away_crest")) {
+  db.exec("ALTER TABLE matches ADD COLUMN away_crest TEXT");
+}
+
 export interface Match {
   id: string;
   home_team: string;
@@ -34,6 +44,8 @@ export interface Match {
   round: string | null;
   date: string;
   venue: string | null;
+  home_crest: string | null;
+  away_crest: string | null;
   created_at: string;
 }
 
@@ -50,13 +62,15 @@ export function createMatch(data: {
   round?: string;
   date: string;
   venue?: string;
+  homeCrest?: string;
+  awayCrest?: string;
 }): Match {
   const id = crypto.randomUUID();
   const stmt = db.prepare(`
-    INSERT INTO matches (id, home_team, away_team, home_score, away_score, competition, round, date, venue)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO matches (id, home_team, away_team, home_score, away_score, competition, round, date, venue, home_crest, away_crest)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(id, data.homeTeam, data.awayTeam, data.homeScore, data.awayScore, data.competition || null, data.round || null, data.date, data.venue || null);
+  stmt.run(id, data.homeTeam, data.awayTeam, data.homeScore, data.awayScore, data.competition || null, data.round || null, data.date, data.venue || null, data.homeCrest || null, data.awayCrest || null);
   return db.prepare("SELECT * FROM matches WHERE id = ?").get(id) as Match;
 }
 
