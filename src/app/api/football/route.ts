@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const dateFrom = searchParams.get("dateFrom");
   const dateTo = searchParams.get("dateTo");
+  const timeZone = searchParams.get("timeZone") || "UTC";
 
   if (!dateFrom || !dateTo) {
     return NextResponse.json(
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const matches = await searchMatchesByDate(dateFrom, dateTo);
+    const matches = await searchMatchesByDate(dateFrom, dateTo, timeZone);
     return NextResponse.json({ matches });
   } catch (error) {
     console.error("Football API error:", error);

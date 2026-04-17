@@ -18,7 +18,7 @@ src/
 │   ├── layout.tsx         # Root layout with Navbar
 │   ├── page.tsx           # Home — match feed (server component)
 │   ├── globals.css        # Tailwind + dark theme (accent #c9ff00)
-│   ├── add/page.tsx       # Add match form
+│   ├── add/page.tsx       # Add match — browse-first with MatchBrowser + manual fallback
 │   ├── stats/page.tsx     # Statistics dashboard with team logos
 │   └── api/
 │       ├── matches/
@@ -28,12 +28,13 @@ src/
 │           └── route.ts   # Proxy to football-data.org API
 ├── components/
 │   ├── Navbar.tsx         # Navigation (client component)
-│   ├── MatchCard.tsx      # Match card with team crests (client component)
-│   ├── MatchForm.tsx      # Add match form (client component)
-│   └── MatchSearch.tsx    # Football API date search (client component)
+│   ├── MatchCard.tsx      # Match card with team crests in home feed (client component)
+│   ├── MatchBrowser.tsx   # Browse matches by date, grouped by competition, click-to-add (client component)
+│   └── MatchForm.tsx      # Collapsible manual add-match form (client component)
 └── lib/
     ├── db.ts              # better-sqlite3 database layer
-    └── football-api.ts    # football-data.org v4 API client
+    ├── football-api.ts    # football-data.org v4 API client (timezone-aware date conversion)
+    └── competition-order.ts  # Competition priority list for display sorting
 data/
     └── ufot.db            # SQLite database (gitignored)
 ```
@@ -46,6 +47,8 @@ data/
 - Database auto-creates tables on first import of `db.ts`. Migrations (e.g. adding columns) use `PRAGMA table_info` checks.
 - **Design system**: Dark theme with `#c9ff00` (electric lime) accent. Custom CSS variables defined in `globals.css` and registered in Tailwind's `@theme` block (`accent`, `card`, `surface`, `muted`, etc.).
 - **Team crests**: Stored as URLs (`home_crest`, `away_crest` columns) from football-data.org API. Displayed via `<img>` tags with a placeholder shield SVG for manually-entered matches. Remote images allowed from `crests.football-data.org` in `next.config.ts`.
+- **Timezone-aware dates**: The football API proxy accepts a `timeZone` param from the client (via `Intl.DateTimeFormat`). Matches are converted from UTC to local time for correct date grouping. The API query range is widened by ±1 day to catch timezone boundary matches, then filtered.
+- **Add match flow**: Browse-first — `/add` auto-loads today's finished matches grouped by competition (sorted by popularity via `competition-order.ts`). Click a match to add it directly. Collapsible manual form as fallback.
 
 ## Environment Notes
 - Windows 11 ARM64
