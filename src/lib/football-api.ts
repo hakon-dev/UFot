@@ -1,51 +1,47 @@
-const API_BASE = "https://api.football-data.org/v4";
+const API_BASE = "https://v3.football.api-sports.io";
 
-interface FootballDataMatch {
-  id: number;
-  utcDate: string;
-  status: string;
-  matchday: number | null;
-  stage: string;
-  venue: string | null;
-  homeTeam: {
+interface ApiFootballFixture {
+  fixture: {
+    id: number;
+    date: string;
+    timezone: string;
+    venue: { id: number | null; name: string | null; city: string | null };
+    status: { long: string; short: string; elapsed: number | null };
+  };
+  league: {
     id: number;
     name: string;
-    shortName: string;
-    tla: string;
-    crest: string;
+    country: string;
+    logo: string;
+    flag: string | null;
+    season: number;
+    round: string;
   };
-  awayTeam: {
-    id: number;
-    name: string;
-    shortName: string;
-    tla: string;
-    crest: string;
+  teams: {
+    home: { id: number; name: string; logo: string; winner: boolean | null };
+    away: { id: number; name: string; logo: string; winner: boolean | null };
   };
+  goals: { home: number | null; away: number | null };
   score: {
-    winner: string | null;
-    fullTime: { home: number | null; away: number | null };
-    halfTime: { home: number | null; away: number | null };
-  };
-  competition: {
-    id: number;
-    name: string;
-    code: string;
-    type: string;
-    emblem: string;
+    halftime: { home: number | null; away: number | null };
+    fulltime: { home: number | null; away: number | null };
+    extratime: { home: number | null; away: number | null };
+    penalty: { home: number | null; away: number | null };
   };
 }
 
-interface FootballDataResponse {
-  matches: FootballDataMatch[];
-  resultSet: {
-    count: number;
-  };
+interface ApiFootballResponse<T> {
+  response: T[];
+  errors: unknown;
+  results: number;
 }
 
 export interface MatchSearchResult {
   id: number;
   homeTeam: string;
   awayTeam: string;
+  homeTeamId: number;
+  awayTeamId: number;
   homeScore: number | null;
   awayScore: number | null;
   competition: string;
@@ -59,94 +55,132 @@ export interface MatchSearchResult {
 }
 
 function getApiKey(): string {
-  const key = process.env.FOOTBALL_DATA_API_KEY;
+  const key = process.env.API_FOOTBALL_KEY;
   if (!key || key === "your_api_key_here") {
-    throw new Error("FOOTBALL_DATA_API_KEY is not configured");
+    throw new Error("API_FOOTBALL_KEY is not configured");
   }
   return key;
 }
 
 async function fetchApi(path: string): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
-    headers: { "X-Auth-Token": getApiKey() },
+    headers: { "x-apisports-key": getApiKey() },
   });
 }
 
 function toLocalDate(utcDate: string, timeZone: string): string {
   const d = new Date(utcDate);
-  const parts = d.toLocaleDateString("en-CA", { timeZone }); // en-CA gives YYYY-MM-DD
-  return parts;
+  return d.toLocaleDateString("en-CA", { timeZone });
 }
 
 function toMatchResult(
-  m: FootballDataMatch,
+  f: ApiFootballFixture,
   timeZone: string
 ): MatchSearchResult {
-  const dateOnly = toLocalDate(m.utcDate, timeZone);
-  const round = m.matchday ? `Matchday ${m.matchday}` : m.stage;
   return {
-    id: m.id,
-    homeTeam: m.homeTeam.name,
-    awayTeam: m.awayTeam.name,
-    homeScore: m.score.fullTime.home,
-    awayScore: m.score.fullTime.away,
-    competition: m.competition.name,
-    competitionCode: m.competition.code,
-    competitionEmblem: m.competition.emblem,
-    round,
-    date: dateOnly,
-    venue: m.venue ?? "",
-    homeCrest: m.homeTeam.crest,
-    awayCrest: m.awayTeam.crest,
+    id: f.fixture.id,
+    homeTeam: f.teams.home.name,
+    awayTeam: f.teams.away.name,
+    homeTeamId: f.teams.home.id,
+    awayTeamId: f.teams.away.id,
+    homeScore: f.goals.home,
+    awayScore: f.goals.away,
+    competition: f.league.name,
+    competitionCode: String(f.league.id),
+    competitionEmblem: f.league.logo,
+    round: f.league.round,
+    date: toLocalDate(f.fixture.date, timeZone),
+    venue: f.fixture.venue.name ?? "",
+    homeCrest: f.teams.home.logo,
+    awayCrest: f.teams.away.logo,
   };
 }
 
-function shiftDate(date: string, days: number): string {
-  const d = new Date(date + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().split("T")[0];
+function enumerateDates(from: string, to: string): string[] {
+  const out: string[] = [];
+  const start = new Date(from + "T00:00:00Z");
+  const end = new Date(to + "T00:00:00Z");
+  for (const d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    out.push(d.toISOString().split("T")[0]);
+  }
+  return out;
 }
 
-// Types for match detail response from /v4/matches/{id}
-interface FootballDataPlayer {
-  id: number;
+// Statuses we consider "finished" — full time, after extra time, after penalties.
+const FINISHED_STATUSES = new Set(["FT", "AET", "PEN"]);
+
+export async function searchMatchesByDate(
+  dateFrom: string,
+  dateTo: string,
+  timeZone: string = "UTC"
+): Promise<MatchSearchResult[]> {
+  const dates = enumerateDates(dateFrom, dateTo);
+  const tz = encodeURIComponent(timeZone);
+
+  const results = await Promise.all(
+    dates.map(async (date) => {
+      const res = await fetchApi(`/fixtures?date=${date}&timezone=${tz}`);
+      if (!res.ok) {
+        throw new Error(`api-football error: ${res.status}`);
+      }
+      const data: ApiFootballResponse<ApiFootballFixture> = await res.json();
+      return data.response ?? [];
+    })
+  );
+
+  const fixtures = results.flat();
+  return fixtures
+    .filter((f) => FINISHED_STATUSES.has(f.fixture.status.short))
+    .map((f) => toMatchResult(f, timeZone))
+    .filter((m) => m.date >= dateFrom && m.date <= dateTo);
+}
+
+interface ApiFootballEventPlayer {
+  id: number | null;
+  name: string | null;
+}
+
+interface ApiFootballEvent {
+  time: { elapsed: number; extra: number | null };
+  team: { id: number; name: string; logo: string };
+  player: ApiFootballEventPlayer;
+  // For "subst", API-Football puts the player coming ON in `assist` and the player going OFF in `player`.
+  assist: ApiFootballEventPlayer;
+  type: string; // "Goal" | "Card" | "subst" | "Var"
+  detail: string; // e.g. "Normal Goal", "Own Goal", "Penalty", "Missed Penalty"
+  comments: string | null;
+}
+
+interface ApiFootballLineupPlayer {
+  player: {
+    id: number;
+    name: string;
+    number: number | null;
+    pos: string | null;
+    grid: string | null;
+  };
+}
+
+interface ApiFootballLineup {
+  team: {
+    id: number;
+    name: string;
+    logo: string;
+    colors: unknown;
+  };
+  formation: string | null;
+  startXI: ApiFootballLineupPlayer[];
+  substitutes: ApiFootballLineupPlayer[];
+  coach: { id: number; name: string; photo: string | null };
+}
+
+export interface LineupPlayerDetail {
   name: string;
   position: string | null;
   shirtNumber: number | null;
-}
-
-interface FootballDataGoal {
-  minute: number;
-  injuryTime: number | null;
-  type: string; // REGULAR, OWN_GOAL, PENALTY
-  team: { id: number; name: string };
-  scorer: FootballDataPlayer;
-  assist: FootballDataPlayer | null;
-}
-
-interface FootballDataSubstitution {
-  minute: number;
-  team: { id: number; name: string };
-  playerOut: FootballDataPlayer;
-  playerIn: FootballDataPlayer;
-}
-
-interface FootballDataDetailResponse {
-  id: number;
-  homeTeam: {
-    id: number;
-    name: string;
-    lineup: FootballDataPlayer[];
-    bench: FootballDataPlayer[];
-  };
-  awayTeam: {
-    id: number;
-    name: string;
-    lineup: FootballDataPlayer[];
-    bench: FootballDataPlayer[];
-  };
-  goals: FootballDataGoal[];
-  substitutions: FootballDataSubstitution[];
+  isStarter: boolean;
+  playerId: number | null;
+  grid: string | null;
 }
 
 export interface MatchDetailResult {
@@ -155,6 +189,8 @@ export interface MatchDetailResult {
     team: string;
     scorerName: string;
     assistName: string | null;
+    scorerId: number | null;
+    assistId: number | null;
     type: string;
   }>;
   substitutions: Array<{
@@ -162,82 +198,172 @@ export interface MatchDetailResult {
     team: string;
     playerOut: string;
     playerIn: string;
+    playerOutId: number | null;
+    playerInId: number | null;
   }>;
-  homeLineup: Array<{ name: string; position: string | null; shirtNumber: number | null; isStarter: boolean }>;
-  awayLineup: Array<{ name: string; position: string | null; shirtNumber: number | null; isStarter: boolean }>;
+  homeLineup: LineupPlayerDetail[];
+  awayLineup: LineupPlayerDetail[];
+  homeFormation: string | null;
+  awayFormation: string | null;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
 }
 
-export async function fetchMatchDetails(matchId: number): Promise<MatchDetailResult> {
-  const res = await fetchApi(`/matches/${matchId}`);
-  if (!res.ok) {
-    throw new Error(`football-data.org API error: ${res.status}`);
-  }
-  const data: FootballDataDetailResponse = await res.json();
+function mapGoalType(detail: string): string {
+  if (detail === "Own Goal") return "OWN_GOAL";
+  if (detail === "Penalty") return "PENALTY";
+  return "REGULAR";
+}
 
-  return {
-    goals: (data.goals ?? []).map((g) => ({
-      minute: g.minute,
-      team: g.team.name,
-      scorerName: g.scorer.name,
-      assistName: g.assist?.name ?? null,
-      type: g.type,
+function mapLineupPlayers(
+  lineup: ApiFootballLineup | undefined
+): LineupPlayerDetail[] {
+  if (!lineup) return [];
+  return [
+    ...lineup.startXI.map((p) => ({
+      name: p.player.name,
+      position: p.player.pos,
+      shirtNumber: p.player.number,
+      isStarter: true,
+      playerId: p.player.id ?? null,
+      grid: p.player.grid ?? null,
     })),
-    substitutions: (data.substitutions ?? []).map((s) => ({
-      minute: s.minute,
-      team: s.team.name,
-      playerOut: s.playerOut.name,
-      playerIn: s.playerIn.name,
+    ...lineup.substitutes.map((p) => ({
+      name: p.player.name,
+      position: p.player.pos,
+      shirtNumber: p.player.number,
+      isStarter: false,
+      playerId: p.player.id ?? null,
+      grid: p.player.grid ?? null,
     })),
-    homeLineup: [
-      ...(data.homeTeam.lineup ?? []).map((p) => ({
-        name: p.name,
-        position: p.position,
-        shirtNumber: p.shirtNumber,
-        isStarter: true,
-      })),
-      ...(data.homeTeam.bench ?? []).map((p) => ({
-        name: p.name,
-        position: p.position,
-        shirtNumber: p.shirtNumber,
-        isStarter: false,
-      })),
-    ],
-    awayLineup: [
-      ...(data.awayTeam.lineup ?? []).map((p) => ({
-        name: p.name,
-        position: p.position,
-        shirtNumber: p.shirtNumber,
-        isStarter: true,
-      })),
-      ...(data.awayTeam.bench ?? []).map((p) => ({
-        name: p.name,
-        position: p.position,
-        shirtNumber: p.shirtNumber,
-        isStarter: false,
-      })),
-    ],
+  ];
+}
+
+interface ApiFootballPlayerProfile {
+  player: {
+    id: number;
+    name: string;
+    firstname: string | null;
+    lastname: string | null;
+    nationality: string | null;
+    photo: string | null;
   };
 }
 
-export async function searchMatchesByDate(
-  dateFrom: string,
-  dateTo: string,
-  timeZone: string = "UTC"
-): Promise<MatchSearchResult[]> {
-  // Widen the query range by 1 day on each side to account for timezone offsets
-  const wideFrom = shiftDate(dateFrom, -1);
-  const wideTo = shiftDate(dateTo, 1);
+export interface PlayerProfileResult {
+  id: number;
+  name: string;
+  nationality: string | null;
+  photo: string | null;
+}
 
-  const res = await fetchApi(
-    `/matches?dateFrom=${wideFrom}&dateTo=${wideTo}&status=FINISHED`
-  );
+interface ApiFootballTeamProfile {
+  team: {
+    id: number;
+    name: string;
+    country: string | null;
+    logo: string | null;
+  };
+}
+
+export interface TeamProfileResult {
+  id: number;
+  name: string;
+  country: string | null;
+  logo: string | null;
+}
+
+export async function fetchTeamProfile(
+  teamId: number
+): Promise<TeamProfileResult | null> {
+  const res = await fetchApi(`/teams?id=${teamId}`);
   if (!res.ok) {
-    throw new Error(`football-data.org API error: ${res.status}`);
+    throw new Error(`api-football error: teams ${res.status}`);
   }
-  const data: FootballDataResponse = await res.json();
+  const data: ApiFootballResponse<ApiFootballTeamProfile> = await res.json();
+  const row = data.response?.[0];
+  if (!row) return null;
+  return {
+    id: row.team.id,
+    name: row.team.name,
+    country: row.team.country ?? null,
+    logo: row.team.logo ?? null,
+  };
+}
 
-  // Convert to local dates and filter to only the requested range
-  return data.matches
-    .map((m) => toMatchResult(m, timeZone))
-    .filter((m) => m.date >= dateFrom && m.date <= dateTo);
+export async function fetchPlayerProfile(
+  playerId: number
+): Promise<PlayerProfileResult | null> {
+  const res = await fetchApi(`/players/profiles?player=${playerId}`);
+  if (!res.ok) {
+    throw new Error(`api-football error: players/profiles ${res.status}`);
+  }
+  const data: ApiFootballResponse<ApiFootballPlayerProfile> = await res.json();
+  const row = data.response?.[0];
+  if (!row) return null;
+  const p = row.player;
+  return {
+    id: p.id,
+    name: p.name,
+    nationality: p.nationality ?? null,
+    photo: p.photo ?? null,
+  };
+}
+
+export async function fetchMatchDetails(
+  matchId: number
+): Promise<MatchDetailResult> {
+  const [eventsRes, lineupsRes, fixtureRes] = await Promise.all([
+    fetchApi(`/fixtures/events?fixture=${matchId}`),
+    fetchApi(`/fixtures/lineups?fixture=${matchId}`),
+    fetchApi(`/fixtures?id=${matchId}`),
+  ]);
+
+  if (!eventsRes.ok || !lineupsRes.ok || !fixtureRes.ok) {
+    throw new Error(
+      `api-football error: events=${eventsRes.status} lineups=${lineupsRes.status} fixture=${fixtureRes.status}`
+    );
+  }
+
+  const [events, lineups, fixture]: [
+    ApiFootballResponse<ApiFootballEvent>,
+    ApiFootballResponse<ApiFootballLineup>,
+    ApiFootballResponse<ApiFootballFixture>
+  ] = await Promise.all([eventsRes.json(), lineupsRes.json(), fixtureRes.json()]);
+
+  const homeTeamId = fixture.response[0]?.teams.home.id;
+  const awayTeamId = fixture.response[0]?.teams.away.id;
+  const homeLineup = lineups.response.find((l) => l.team.id === homeTeamId);
+  const awayLineup = lineups.response.find((l) => l.team.id === awayTeamId);
+
+  const goalEvents = events.response.filter(
+    (e) => e.type === "Goal" && e.detail !== "Missed Penalty"
+  );
+  const subEvents = events.response.filter((e) => e.type === "subst");
+
+  return {
+    goals: goalEvents.map((e) => ({
+      minute: e.time.elapsed,
+      team: e.team.name,
+      scorerName: e.player.name ?? "",
+      assistName: e.assist.name ?? null,
+      scorerId: e.player.id ?? null,
+      assistId: e.assist.id ?? null,
+      type: mapGoalType(e.detail),
+    })),
+    substitutions: subEvents.map((e) => ({
+      minute: e.time.elapsed,
+      team: e.team.name,
+      playerOut: e.player.name ?? "",
+      playerIn: e.assist.name ?? "",
+      playerOutId: e.player.id ?? null,
+      playerInId: e.assist.id ?? null,
+    })),
+    homeLineup: mapLineupPlayers(homeLineup),
+    awayLineup: mapLineupPlayers(awayLineup),
+    homeFormation: homeLineup?.formation ?? null,
+    awayFormation: awayLineup?.formation ?? null,
+    homeTeamId: homeTeamId ?? null,
+    awayTeamId: awayTeamId ?? null,
+  };
 }

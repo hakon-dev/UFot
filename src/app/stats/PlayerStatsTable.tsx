@@ -1,51 +1,283 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 
 interface PlayerStat {
+  playerId: number | null;
   name: string;
   minutesWatched: number;
   matches: number;
   goalsWatched: number;
   assistsWatched: number;
+  club: string | null;
+  clubId: number | null;
+  clubCrest: string | null;
+  nationality: string | null;
+  countryCode: string | null;
+}
+
+type SortKey =
+  | "name"
+  | "club"
+  | "nationality"
+  | "minutesWatched"
+  | "matches"
+  | "goalsWatched"
+  | "assistsWatched";
+type SortDir = "asc" | "desc";
+
+const NUMERIC_KEYS: SortKey[] = ["minutesWatched", "matches", "goalsWatched", "assistsWatched"];
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function PhotoCell({ playerId, name }: { playerId: number | null; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (playerId == null || failed) {
+    return (
+      <div className="w-7 h-7 rounded-full bg-surface ring-1 ring-card-border flex items-center justify-center shrink-0">
+        <span className="text-[9px] font-bold text-muted">{initials(name)}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="w-7 h-7 rounded-full bg-surface ring-1 ring-card-border overflow-hidden shrink-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`https://media.api-sports.io/football/players/${playerId}.png`}
+        alt={name}
+        className="w-full h-full object-cover"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
+function ClubCell({ club, clubId, clubCrest }: { club: string | null; clubId: number | null; clubCrest: string | null }) {
+  if (!club) return <span className="text-muted">-</span>;
+  const inner = (
+    <div className="flex items-center gap-2">
+      {clubCrest ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={clubCrest} alt={club} className="w-4 h-4 object-contain shrink-0" />
+      ) : (
+        <div className="w-4 h-4 shrink-0" />
+      )}
+      <span className="truncate">{club}</span>
+    </div>
+  );
+  if (clubId != null) {
+    return (
+      <Link href={`/teams/${clubId}`} className="hover:text-accent transition-colors inline-block max-w-[10rem]">
+        {inner}
+      </Link>
+    );
+  }
+  return <div className="max-w-[10rem]">{inner}</div>;
+}
+
+function NationalityCell({ nationality, countryCode }: { nationality: string | null; countryCode: string | null }) {
+  if (!nationality) return <span className="text-muted">-</span>;
+  return (
+    <div className="flex items-center gap-2">
+      {countryCode ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`https://flagcdn.com/${countryCode}.svg`}
+          alt={nationality}
+          className="w-5 h-3.5 object-cover rounded-sm ring-1 ring-card-border shrink-0"
+        />
+      ) : (
+        <div className="w-5 h-3.5 shrink-0" />
+      )}
+      <span className="truncate">{nationality}</span>
+    </div>
+  );
+}
+
+function SortArrow({ dir }: { dir: SortDir }) {
+  return <span className="ml-1 text-[10px] text-accent">{dir === "asc" ? "▲" : "▼"}</span>;
+}
+
+function HeaderButton({
+  label,
+  sortKey,
+  currentKey,
+  currentDir,
+  onSort,
+  align,
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentKey: SortKey;
+  currentDir: SortDir;
+  onSort: (key: SortKey) => void;
+  align: "left" | "center";
+}) {
+  const isActive = currentKey === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={`inline-flex items-center ${
+        align === "center" ? "justify-center" : "justify-start"
+      } gap-0.5 font-medium hover:text-accent transition-colors w-full`}
+    >
+      {label}
+      {isActive && <SortArrow dir={currentDir} />}
+    </button>
+  );
+}
+
+function compare(a: PlayerStat, b: PlayerStat, key: SortKey, dir: SortDir): number {
+  const mult = dir === "asc" ? 1 : -1;
+
+  if (NUMERIC_KEYS.includes(key)) {
+    const av = a[key] as number;
+    const bv = b[key] as number;
+    return (av - bv) * mult;
+  }
+
+  // String columns: null/empty sort to the end regardless of direction.
+  const av =
+    key === "name" ? a.name : key === "club" ? a.club : a.nationality;
+  const bv =
+    key === "name" ? b.name : key === "club" ? b.club : b.nationality;
+  const aEmpty = !av;
+  const bEmpty = !bv;
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+  return av!.localeCompare(bv!) * mult;
 }
 
 export default function PlayerStatsTable({ players }: { players: PlayerStat[] }) {
   const [showAll, setShowAll] = useState(false);
-  const displayed = showAll ? players : players.slice(0, 20);
+  const [filter, setFilter] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("minutesWatched");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(NUMERIC_KEYS.includes(key) ? "desc" : "asc");
+    }
+  };
+
+  const processed = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const filtered = q
+      ? players.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            (p.club?.toLowerCase().includes(q) ?? false) ||
+            (p.nationality?.toLowerCase().includes(q) ?? false)
+        )
+      : players;
+    return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
+  }, [players, filter, sortKey, sortDir]);
+
+  // When filtering, show everything — a user typing a search expects hits not to be hidden.
+  const isFiltering = filter.trim().length > 0;
+  const displayed = isFiltering || showAll ? processed : processed.slice(0, 20);
 
   return (
     <>
+      <div className="mb-3">
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter by name, club, or nationality…"
+          className="w-full sm:max-w-xs bg-surface border border-card-border rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
+        />
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-muted border-b border-card-border">
-              <th className="text-left pb-3 font-medium">Player</th>
-              <th className="text-center pb-3 font-medium">Minutes</th>
-              <th className="text-center pb-3 font-medium">Matches</th>
-              <th className="text-center pb-3 font-medium">Goals</th>
-              <th className="text-center pb-3 font-medium">Assists</th>
+              <th className="text-left pb-3">
+                <HeaderButton label="Player" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
+              </th>
+              <th className="text-left pb-3">
+                <HeaderButton label="Club" sortKey="club" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
+              </th>
+              <th className="text-left pb-3">
+                <HeaderButton label="Nationality" sortKey="nationality" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
+              </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="Minutes" sortKey="minutesWatched" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="Matches" sortKey="matches" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="Goals" sortKey="goalsWatched" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="Assists" sortKey="assistsWatched" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
             </tr>
           </thead>
           <tbody>
-            {displayed.map((p) => (
-              <tr key={p.name} className="border-b border-card-border/50">
-                <td className="py-2.5 text-slate-200 font-medium">{p.name}</td>
-                <td className="py-2.5 text-center text-slate-300 tabular-nums">{p.minutesWatched}</td>
-                <td className="py-2.5 text-center text-muted tabular-nums">{p.matches}</td>
-                <td className="py-2.5 text-center text-accent tabular-nums">{p.goalsWatched || "-"}</td>
-                <td className="py-2.5 text-center text-muted tabular-nums">{p.assistsWatched || "-"}</td>
+            {displayed.map((p, i) => {
+              const nameCell = (
+                <div className="flex items-center gap-2.5">
+                  <PhotoCell playerId={p.playerId} name={p.name} />
+                  <span>{p.name}</span>
+                </div>
+              );
+              return (
+                <tr key={`${p.playerId ?? "n"}-${p.name}-${i}`} className="border-b border-card-border/50">
+                  <td className="py-2.5 text-slate-200 font-medium">
+                    {p.playerId != null ? (
+                      <Link
+                        href={`/players/${p.playerId}`}
+                        className="hover:text-accent transition-colors inline-block"
+                      >
+                        {nameCell}
+                      </Link>
+                    ) : (
+                      nameCell
+                    )}
+                  </td>
+                  <td className="py-2.5 text-slate-300">
+                    <ClubCell club={p.club} clubId={p.clubId} clubCrest={p.clubCrest} />
+                  </td>
+                  <td className="py-2.5 text-slate-300">
+                    <NationalityCell nationality={p.nationality} countryCode={p.countryCode} />
+                  </td>
+                  <td className="py-2.5 text-center text-slate-300 tabular-nums">{p.minutesWatched}</td>
+                  <td className="py-2.5 text-center text-muted tabular-nums">{p.matches}</td>
+                  <td className="py-2.5 text-center text-accent tabular-nums">{p.goalsWatched || "-"}</td>
+                  <td className="py-2.5 text-center text-muted tabular-nums">{p.assistsWatched || "-"}</td>
+                </tr>
+              );
+            })}
+            {displayed.length === 0 && (
+              <tr>
+                <td colSpan={7} className="py-6 text-center text-muted">
+                  No players match &quot;{filter}&quot;.
+                </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>
-      {players.length > 20 && (
+      {!isFiltering && processed.length > 20 && (
         <button
           onClick={() => setShowAll(!showAll)}
           className="text-xs text-muted hover:text-accent transition-colors mt-3"
         >
-          {showAll ? "Show top 20" : `Show all ${players.length} players`}
+          {showAll ? "Show top 20" : `Show all ${processed.length} players`}
         </button>
       )}
     </>

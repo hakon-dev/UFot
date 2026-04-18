@@ -1,16 +1,21 @@
+import Link from "next/link";
 import { getAllMatches, getMatchesWithDetails } from "@/lib/db";
-import { computePlayerStats } from "@/lib/player-stats";
+import { computePlayerStats, enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import PlayerStatsTable from "./PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
 
 interface TeamRecord {
   team: string;
+  teamId: number | null;
   crest: string | null;
   minutes: number;
+  country: string | null;
+  countryCode: string | null;
 }
 
-export default function StatsPage() {
+export default async function StatsPage() {
   const matches = getAllMatches();
 
   const totalMatches = matches.length;
@@ -30,6 +35,9 @@ export default function StatsPage() {
   // Player stats
   const matchesWithDetails = getMatchesWithDetails();
   const playerStats = computePlayerStats(matchesWithDetails);
+  // Fill nationality from cache for everyone; lazy-fetch up to 20 uncached per visit to
+  // respect the 100/day API budget. The rest fill in on subsequent visits.
+  await enrichPlayerStatsWithNationality(playerStats);
 
   // Matches per competition
   const competitionCounts: Record<string, number> = {};
@@ -42,11 +50,12 @@ export default function StatsPage() {
 
   // Team records: equivalent matches watched per team
   const teamRecords: Record<string, TeamRecord> = {};
-  function ensureTeam(name: string, crest: string | null) {
+  function ensureTeam(name: string, crest: string | null, teamId: number | null) {
     if (!teamRecords[name]) {
-      teamRecords[name] = { team: name, crest, minutes: 0 };
-    } else if (!teamRecords[name].crest && crest) {
-      teamRecords[name].crest = crest;
+      teamRecords[name] = { team: name, teamId, crest, minutes: 0, country: null, countryCode: null };
+    } else {
+      if (!teamRecords[name].crest && crest) teamRecords[name].crest = crest;
+      if (teamRecords[name].teamId == null && teamId != null) teamRecords[name].teamId = teamId;
     }
   }
 
@@ -59,8 +68,8 @@ export default function StatsPage() {
       matchMinutes = 90;
     }
 
-    ensureTeam(m.home_team, m.home_crest);
-    ensureTeam(m.away_team, m.away_crest);
+    ensureTeam(m.home_team, m.home_crest, m.home_team_id);
+    ensureTeam(m.away_team, m.away_crest, m.away_team_id);
 
     teamRecords[m.home_team].minutes += matchMinutes;
     teamRecords[m.away_team].minutes += matchMinutes;
@@ -68,6 +77,10 @@ export default function StatsPage() {
 
   const topTeams = Object.values(teamRecords)
     .sort((a, b) => b.minutes - a.minutes);
+
+  // Lazy-fetch country for up to 20 uncached teams per visit — bounded to respect
+  // the 100/day API-Football budget. Cached in the `teams` table for later visits.
+  await enrichTeamRecordsWithCountry(topTeams);
 
   const cardClass = "bg-card rounded-xl p-6 border border-card-border";
 
@@ -138,36 +151,67 @@ export default function StatsPage() {
                 <thead>
                   <tr className="text-muted border-b border-card-border">
                     <th className="text-left pb-3 font-medium">Team</th>
+                    <th className="text-left pb-3 font-medium">Country</th>
                     <th className="text-right pb-3 font-medium">Eq. Matches</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topTeams.map((t) => (
-                    <tr key={t.team} className="border-b border-card-border/50">
-                      <td className="py-2.5 text-slate-200 font-medium">
-                        <div className="flex items-center gap-2.5">
-                          {t.crest ? (
-                            <img src={t.crest} alt={t.team} className="w-5 h-5 object-contain" />
+                  {topTeams.map((t) => {
+                    const cellInner = (
+                      <div className="flex items-center gap-2.5">
+                        {t.crest ? (
+                          <img src={t.crest} alt={t.team} className="w-5 h-5 object-contain" />
+                        ) : (
+                          <svg className="w-5 h-5 text-muted/40" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2L3 7v5c0 5.25 3.83 10.15 9 11.25C17.17 22.15 21 17.25 21 12V7l-9-5zm0 2.18l7 3.89v4.93c0 4.29-3.08 8.28-7 9.18-3.92-.9-7-4.89-7-9.18V8.07l7-3.89z" />
+                          </svg>
+                        )}
+                        <span>{t.team}</span>
+                      </div>
+                    );
+                    return (
+                      <tr key={t.team} className="border-b border-card-border/50">
+                        <td className="py-2.5 text-slate-200 font-medium">
+                          {t.teamId != null ? (
+                            <Link href={`/teams/${t.teamId}`} className="hover:text-accent transition-colors inline-block">
+                              {cellInner}
+                            </Link>
                           ) : (
-                            <svg className="w-5 h-5 text-muted/40" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M12 2L3 7v5c0 5.25 3.83 10.15 9 11.25C17.17 22.15 21 17.25 21 12V7l-9-5zm0 2.18l7 3.89v4.93c0 4.29-3.08 8.28-7 9.18-3.92-.9-7-4.89-7-9.18V8.07l7-3.89z" />
-                            </svg>
+                            cellInner
                           )}
-                          {t.team}
-                        </div>
-                      </td>
-                      <td className="py-2.5 text-right text-accent tabular-nums">{(t.minutes / 90).toFixed(1)}</td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-2.5 text-slate-300">
+                          {t.country ? (
+                            <div className="flex items-center gap-2">
+                              {t.countryCode ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={`https://flagcdn.com/${t.countryCode}.svg`}
+                                  alt={t.country}
+                                  className="w-5 h-3.5 object-cover rounded-sm ring-1 ring-card-border shrink-0"
+                                />
+                              ) : (
+                                <div className="w-5 h-3.5 shrink-0" />
+                              )}
+                              <span className="truncate">{t.country}</span>
+                            </div>
+                          ) : (
+                            <span className="text-muted">-</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right text-accent tabular-nums">{(t.minutes / 90).toFixed(1)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* Player Watch Stats */}
+          {/* Most Watched Players */}
           {playerStats.length > 0 && (
             <div className={cardClass}>
-              <h2 className="text-lg font-semibold text-white mb-4">Player Watch Stats</h2>
+              <h2 className="text-lg font-semibold text-white mb-4">Most Watched Players</h2>
               <PlayerStatsTable players={playerStats} />
             </div>
           )}

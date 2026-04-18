@@ -20,8 +20,11 @@ export async function POST(request: NextRequest) {
     venue: body.venue || undefined,
     homeCrest: body.homeCrest || undefined,
     awayCrest: body.awayCrest || undefined,
-    footballDataId: body.footballDataId || undefined,
+    externalMatchId: body.externalMatchId || undefined,
+    externalSource: body.externalSource || undefined,
     watchIntervals: body.watchIntervals || undefined,
+    homeTeamId: body.homeTeamId || undefined,
+    awayTeamId: body.awayTeamId || undefined,
   });
 
   return NextResponse.json(match, { status: 201 });

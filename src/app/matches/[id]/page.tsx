@@ -87,10 +87,12 @@ export default async function MatchDetailPage({
       {/* Client-side: details + intervals */}
       <MatchDetailClient
         matchId={match.id}
-        hasFootballDataId={match.football_data_id !== null}
+        canFetchDetails={match.external_match_id !== null && match.external_source === "api-football"}
         initialIntervals={watchIntervals}
         homeTeam={match.home_team}
         awayTeam={match.away_team}
+        homeTeamId={match.home_team_id}
+        awayTeamId={match.away_team_id}
       />
     </div>
   );

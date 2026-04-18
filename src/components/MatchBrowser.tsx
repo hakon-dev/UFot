@@ -8,6 +8,8 @@ interface MatchSearchResult {
   id: number;
   homeTeam: string;
   awayTeam: string;
+  homeTeamId: number;
+  awayTeamId: number;
   homeScore: number | null;
   awayScore: number | null;
   competition: string;
@@ -62,7 +64,7 @@ export default function MatchBrowser() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
-  // Map football_data_id -> internal match id (for interval editing)
+  // Map external_match_id -> internal match id (for interval editing)
   const [addedMatchIds, setAddedMatchIds] = useState<Map<number, string>>(new Map());
   const [addingId, setAddingId] = useState<number | null>(null);
   const [editingIntervalsId, setEditingIntervalsId] = useState<number | null>(null);
@@ -113,7 +115,10 @@ export default function MatchBrowser() {
           venue: match.venue,
           homeCrest: match.homeCrest,
           awayCrest: match.awayCrest,
-          footballDataId: match.id,
+          externalMatchId: match.id,
+          externalSource: "api-football",
+          homeTeamId: match.homeTeamId,
+          awayTeamId: match.awayTeamId,
         }),
       });
       if (res.ok) {

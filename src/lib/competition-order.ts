@@ -1,19 +1,24 @@
 // Priority order for competition sorting. Lower index = higher priority.
-// Codes from football-data.org v4 API.
+// Keys are API-Football league IDs (stringified) from api-sports.io v3.
 const COMPETITION_PRIORITY: string[] = [
-  "CL",   // UEFA Champions League
-  "PL",   // Premier League
-  "PD",   // La Liga
-  "BL1",  // Bundesliga
-  "SA",   // Serie A
-  "FL1",  // Ligue 1
-  "ELC",  // Championship
-  "DED",  // Eredivisie
-  "PPL",  // Primeira Liga
-  "CLI",  // Copa Libertadores
-  "BSA",  // Brasileirao Serie A
-  "WC",   // FIFA World Cup
-  "EC",   // European Championship
+  "2",    // UEFA Champions League
+  "39",   // Premier League
+  "140",  // La Liga
+  "78",   // Bundesliga
+  "135",  // Serie A
+  "61",   // Ligue 1
+  "1",    // FIFA World Cup
+  "4",    // Euro Championship
+  "3",    // UEFA Europa League
+  "103",  // Eliteserien (Norway)
+  "40",   // Championship (England)
+  "88",   // Eredivisie
+  "94",   // Primeira Liga
+  "13",   // Copa Libertadores
+  "71",   // Série A (Brazil)
+  "113",  // Allsvenskan (Sweden)
+  "119",  // Superliga (Denmark)
+  "244",  // Veikkausliiga (Finland)
 ];
 
 export function getCompetitionSortKey(code: string): number {
