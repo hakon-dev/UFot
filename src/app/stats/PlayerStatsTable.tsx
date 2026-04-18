@@ -10,6 +10,8 @@ interface PlayerStat {
   matches: number;
   goalsWatched: number;
   assistsWatched: number;
+  yellowsWatched: number;
+  redsWatched: number;
   club: string | null;
   clubId: number | null;
   clubCrest: string | null;
@@ -24,10 +26,19 @@ type SortKey =
   | "minutesWatched"
   | "matches"
   | "goalsWatched"
-  | "assistsWatched";
+  | "assistsWatched"
+  | "yellowsWatched"
+  | "redsWatched";
 type SortDir = "asc" | "desc";
 
-const NUMERIC_KEYS: SortKey[] = ["minutesWatched", "matches", "goalsWatched", "assistsWatched"];
+const NUMERIC_KEYS: SortKey[] = [
+  "minutesWatched",
+  "matches",
+  "goalsWatched",
+  "assistsWatched",
+  "yellowsWatched",
+  "redsWatched",
+];
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -225,6 +236,12 @@ export default function PlayerStatsTable({ players }: { players: PlayerStat[] })
               <th className="text-center pb-3">
                 <HeaderButton label="Assists" sortKey="assistsWatched" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
               </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="Y" sortKey="yellowsWatched" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="R" sortKey="redsWatched" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -259,12 +276,26 @@ export default function PlayerStatsTable({ players }: { players: PlayerStat[] })
                   <td className="py-2.5 text-center text-muted tabular-nums">{p.matches}</td>
                   <td className="py-2.5 text-center text-accent tabular-nums">{p.goalsWatched || "-"}</td>
                   <td className="py-2.5 text-center text-muted tabular-nums">{p.assistsWatched || "-"}</td>
+                  <td className="py-2.5 text-center tabular-nums">
+                    {p.yellowsWatched > 0 ? (
+                      <span className="text-yellow-400">{p.yellowsWatched}</span>
+                    ) : (
+                      <span className="text-muted">-</span>
+                    )}
+                  </td>
+                  <td className="py-2.5 text-center tabular-nums">
+                    {p.redsWatched > 0 ? (
+                      <span className="text-red-400">{p.redsWatched}</span>
+                    ) : (
+                      <span className="text-muted">-</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
             {displayed.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-muted">
+                <td colSpan={9} className="py-6 text-center text-muted">
                   No players match &quot;{filter}&quot;.
                 </td>
               </tr>

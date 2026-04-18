@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import WatchIntervalEditor from "@/components/WatchIntervalEditor";
-import PitchLineup, { type PitchPlayer } from "@/components/PitchLineup";
+import PitchLineup, { type PitchPlayer, type PlayerAnnotations } from "@/components/PitchLineup";
 
 interface Goal {
   minute: number;
   team: string;
   scorer_name: string;
+  scorer_id: number | null;
   assist_name: string | null;
+  assist_id: number | null;
   type: string | null;
 }
 
@@ -17,7 +19,9 @@ interface Substitution {
   minute: number;
   team: string;
   player_out: string;
+  player_out_id: number | null;
   player_in: string;
+  player_in_id: number | null;
 }
 
 interface Lineup {
@@ -30,11 +34,26 @@ interface Lineup {
   grid_position: string | null;
 }
 
+interface Card {
+  minute: number;
+  team: string;
+  player_name: string;
+  player_id: number | null;
+  card_type: string; // YELLOW / RED / YELLOWRED
+}
+
+interface NationalityEntry {
+  nationality: string | null;
+  countryCode: string | null;
+}
+
 interface MatchDetails {
   available: boolean;
   goals?: Goal[];
   substitutions?: Substitution[];
   lineups?: Lineup[];
+  cards?: Card[];
+  nationalities?: Record<string, NationalityEntry>;
   homeFormation?: string | null;
   awayFormation?: string | null;
   homeTeamId?: number | null;
@@ -67,13 +86,7 @@ function toPitchPlayer(l: Lineup): PitchPlayer {
   };
 }
 
-function BenchList({
-  players,
-  label,
-}: {
-  players: Lineup[];
-  label: string;
-}) {
+function BenchList({ players, label }: { players: Lineup[]; label: string }) {
   if (players.length === 0) return null;
   return (
     <div>
@@ -100,6 +113,18 @@ function BenchList({
       </div>
     </div>
   );
+}
+
+function cardLabel(type: string): string {
+  if (type === "YELLOW") return "Yellow";
+  if (type === "RED") return "Red";
+  if (type === "YELLOWRED") return "2nd Yellow → Red";
+  return type;
+}
+
+function cardColor(type: string): string {
+  if (type === "YELLOW") return "bg-yellow-400";
+  return "bg-red-500";
 }
 
 export default function MatchDetailClient({
@@ -147,6 +172,72 @@ export default function MatchDetailClient({
 
   const homeSubs = details?.substitutions?.filter((s) => s.team === homeTeam) ?? [];
   const awaySubs = details?.substitutions?.filter((s) => s.team === awayTeam) ?? [];
+
+  const homeCards = details?.cards?.filter((c) => c.team === homeTeam) ?? [];
+  const awayCards = details?.cards?.filter((c) => c.team === awayTeam) ?? [];
+
+  // Build a per-player annotations lookup (keyed by player_id, fallback to name).
+  const getAnnotations = useMemo(() => {
+    const goals = details?.goals ?? [];
+    const subs = details?.substitutions ?? [];
+    const cards = details?.cards ?? [];
+    const nationalities = details?.nationalities ?? {};
+
+    function keyFor(id: number | null, name: string): string {
+      return id != null ? `id:${id}` : `name:${name}`;
+    }
+
+    return (player: PitchPlayer, side: "home" | "away"): PlayerAnnotations => {
+      const playerKey = keyFor(player.playerId, player.name);
+      const teamName = side === "home" ? homeTeam : awayTeam;
+
+      const scored: number[] = [];
+      const assisted: number[] = [];
+      for (const g of goals) {
+        if (g.team !== teamName && g.type !== "OWN_GOAL") {
+          // Goal scored by opposing team — could still be an own goal counted to the other side (rare, skip).
+          continue;
+        }
+        if (keyFor(g.scorer_id, g.scorer_name) === playerKey && g.type !== "OWN_GOAL") {
+          scored.push(g.minute);
+        }
+        if (g.assist_name && keyFor(g.assist_id, g.assist_name) === playerKey) {
+          assisted.push(g.minute);
+        }
+      }
+
+      let yellow: number | null = null;
+      let red: number | null = null;
+      for (const c of cards) {
+        if (c.team !== teamName) continue;
+        if (keyFor(c.player_id, c.player_name) !== playerKey) continue;
+        if (c.card_type === "YELLOW") yellow = yellow ?? c.minute;
+        else if (c.card_type === "RED" || c.card_type === "YELLOWRED") red = c.minute;
+      }
+
+      let subOff: number | null = null;
+      for (const s of subs) {
+        if (s.team !== teamName) continue;
+        if (keyFor(s.player_out_id, s.player_out) === playerKey) {
+          subOff = s.minute;
+          break;
+        }
+      }
+
+      const nationalityEntry =
+        player.playerId != null ? nationalities[String(player.playerId)] : undefined;
+
+      return {
+        goals: scored,
+        assists: assisted,
+        yellow,
+        red,
+        subOff,
+        nationality: nationalityEntry?.nationality ?? null,
+        countryCode: nationalityEntry?.countryCode ?? null,
+      };
+    };
+  }, [details, homeTeam, awayTeam]);
 
   return (
     <div className="space-y-6">
@@ -226,6 +317,7 @@ export default function MatchDetailClient({
                 awayFormation={details.awayFormation ?? null}
                 homeStarters={homeStarters.map(toPitchPlayer)}
                 awayStarters={awayStarters.map(toPitchPlayer)}
+                getAnnotations={getAnnotations}
               />
             </div>
           )}
@@ -237,6 +329,17 @@ export default function MatchDetailClient({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <SubColumn teamName={homeTeam} teamId={resolvedHomeTeamId ?? null} subs={homeSubs} />
                 <SubColumn teamName={awayTeam} teamId={resolvedAwayTeamId ?? null} subs={awaySubs} />
+              </div>
+            </div>
+          )}
+
+          {/* Cards */}
+          {details.cards && details.cards.length > 0 && (
+            <div className={cardClass}>
+              <h2 className="text-lg font-semibold text-white mb-4">Cards</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <CardColumn teamName={homeTeam} teamId={resolvedHomeTeamId ?? null} cards={homeCards} />
+                <CardColumn teamName={awayTeam} teamId={resolvedAwayTeamId ?? null} cards={awayCards} />
               </div>
             </div>
           )}
@@ -257,15 +360,7 @@ export default function MatchDetailClient({
   );
 }
 
-function SubColumn({
-  teamName,
-  teamId,
-  subs,
-}: {
-  teamName: string;
-  teamId: number | null;
-  subs: Substitution[];
-}) {
+function TeamHeading({ teamName, teamId }: { teamName: string; teamId: number | null }) {
   const header = (
     <h3 className="text-sm font-semibold text-accent mb-3 flex items-center gap-2">
       {teamId != null && (
@@ -279,15 +374,28 @@ function SubColumn({
       {teamName}
     </h3>
   );
+  if (teamId != null) {
+    return (
+      <Link href={`/teams/${teamId}`} className="hover:text-accent transition-colors block">
+        {header}
+      </Link>
+    );
+  }
+  return header;
+}
+
+function SubColumn({
+  teamName,
+  teamId,
+  subs,
+}: {
+  teamName: string;
+  teamId: number | null;
+  subs: Substitution[];
+}) {
   return (
     <div>
-      {teamId != null ? (
-        <Link href={`/teams/${teamId}`} className="hover:text-accent transition-colors block">
-          {header}
-        </Link>
-      ) : (
-        header
-      )}
+      <TeamHeading teamName={teamName} teamId={teamId} />
       {subs.length === 0 ? (
         <p className="text-muted text-sm">No substitutions</p>
       ) : (
@@ -311,6 +419,51 @@ function SubColumn({
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CardColumn({
+  teamName,
+  teamId,
+  cards,
+}: {
+  teamName: string;
+  teamId: number | null;
+  cards: Card[];
+}) {
+  return (
+    <div>
+      <TeamHeading teamName={teamName} teamId={teamId} />
+      {cards.length === 0 ? (
+        <p className="text-muted text-sm">No cards</p>
+      ) : (
+        <div className="space-y-2">
+          {cards.map((c, i) => {
+            const content = (
+              <span className="flex items-center gap-2 text-sm">
+                <span className={`w-2.5 h-3.5 rounded-[1px] shrink-0 ${cardColor(c.card_type)}`} />
+                <span className="text-slate-200 truncate">{c.player_name}</span>
+                <span className="text-muted text-xs">({cardLabel(c.card_type)})</span>
+              </span>
+            );
+            return (
+              <div key={i} className="flex items-center gap-3">
+                <span className="text-muted font-bold tabular-nums w-8 text-right text-sm">{c.minute}&apos;</span>
+                <div className="flex-1 min-w-0">
+                  {c.player_id != null ? (
+                    <Link href={`/players/${c.player_id}`} className="hover:text-accent transition-colors block">
+                      {content}
+                    </Link>
+                  ) : (
+                    content
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

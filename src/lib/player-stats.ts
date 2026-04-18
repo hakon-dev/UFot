@@ -1,4 +1,4 @@
-import type { Match, MatchGoal, MatchSubstitution, MatchLineup } from "./db";
+import type { Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard } from "./db";
 import { getMatchesWithDetails, getPlayers, upsertPlayer } from "./db";
 import { countryNameToCode } from "./country-codes";
 import { fetchPlayerProfile } from "./football-api";
@@ -10,6 +10,8 @@ export interface PlayerStat {
   matches: number;
   goalsWatched: number;
   assistsWatched: number;
+  yellowsWatched: number;
+  redsWatched: number;
   club: string | null;
   clubId: number | null;
   clubCrest: string | null;
@@ -21,6 +23,7 @@ type MatchWithDetails = Match & {
   goals: MatchGoal[];
   substitutions: MatchSubstitution[];
   lineups: MatchLineup[];
+  cards: MatchCard[];
 };
 
 function parseIntervals(raw: string | null): number[][] {
@@ -91,6 +94,7 @@ export function computePlayerStats(
     if (!s) {
       s = {
         playerId, name, minutesWatched: 0, matches: 0, goalsWatched: 0, assistsWatched: 0,
+        yellowsWatched: 0, redsWatched: 0,
         club: null, clubId: null, clubCrest: null, nationality: null, countryCode: null,
       };
       stats.set(key, s);
@@ -191,9 +195,64 @@ export function computePlayerStats(
         ensure(assistId, goal.assist_name).assistsWatched += 1;
       }
     }
+
+    for (const card of match.cards) {
+      if (teamSideName && card.team !== teamSideName) continue;
+      if (!minuteInIntervals(card.minute, watchIntervals)) continue;
+
+      const pid = card.player_id ?? nameToId.get(card.player_name) ?? null;
+      const stat = ensure(pid, card.player_name);
+      if (card.card_type === "YELLOW") stat.yellowsWatched += 1;
+      else if (card.card_type === "RED" || card.card_type === "YELLOWRED") stat.redsWatched += 1;
+    }
   }
 
   return [...stats.values()].sort((a, b) => b.minutesWatched - a.minutesWatched);
+}
+
+export interface PlayerNationality {
+  nationality: string | null;
+  countryCode: string | null;
+}
+
+export async function getPlayerNationalities(
+  playerIds: number[],
+  options: { maxFetches?: number } = {}
+): Promise<Map<number, PlayerNationality>> {
+  const maxFetches = options.maxFetches ?? 15;
+  const result = new Map<number, PlayerNationality>();
+  const uniqueIds = [...new Set(playerIds)];
+  const cached = getPlayers(uniqueIds);
+
+  for (const id of uniqueIds) {
+    const rec = cached.get(id);
+    if (rec) {
+      result.set(id, { nationality: rec.nationality, countryCode: rec.country_code });
+    }
+  }
+
+  const toFetch = uniqueIds.filter((id) => !cached.has(id)).slice(0, maxFetches);
+  await Promise.all(
+    toFetch.map(async (id) => {
+      try {
+        const profile = await fetchPlayerProfile(id);
+        if (!profile) return;
+        const code = countryNameToCode(profile.nationality);
+        upsertPlayer({
+          id: profile.id,
+          name: profile.name,
+          nationality: profile.nationality,
+          countryCode: code,
+          photo: profile.photo,
+        });
+        result.set(id, { nationality: profile.nationality, countryCode: code });
+      } catch {
+        // best-effort
+      }
+    })
+  );
+
+  return result;
 }
 
 export async function enrichPlayerStatsWithNationality(
@@ -256,6 +315,8 @@ export interface PlayerMatchAppearance {
   minutesWatched: number;
   goalsWatched: number;
   assistsWatched: number;
+  yellowsWatched: number;
+  redsWatched: number;
 }
 
 export interface PlayerProfile {
@@ -266,6 +327,8 @@ export interface PlayerProfile {
   totalMatches: number;
   totalGoals: number;
   totalAssists: number;
+  totalYellows: number;
+  totalReds: number;
   appearances: PlayerMatchAppearance[];
 }
 
@@ -307,8 +370,17 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
     let assistsWatched = 0;
     for (const goal of match.goals) {
       if (!minuteInIntervals(goal.minute, watchIntervals)) continue;
-      if (goal.scorer_name === lineup.player_name && goal.type !== "OWN_GOAL") goalsWatched += 1;
-      if (goal.assist_name === lineup.player_name) assistsWatched += 1;
+      if ((goal.scorer_id === playerId || goal.scorer_name === lineup.player_name) && goal.type !== "OWN_GOAL") goalsWatched += 1;
+      if (goal.assist_id === playerId || goal.assist_name === lineup.player_name) assistsWatched += 1;
+    }
+
+    let yellowsWatched = 0;
+    let redsWatched = 0;
+    for (const card of match.cards) {
+      if (!minuteInIntervals(card.minute, watchIntervals)) continue;
+      if (card.player_id !== playerId && card.player_name !== lineup.player_name) continue;
+      if (card.card_type === "YELLOW") yellowsWatched += 1;
+      else if (card.card_type === "RED" || card.card_type === "YELLOWRED") redsWatched += 1;
     }
 
     appearances.push({
@@ -324,6 +396,8 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
       minutesWatched,
       goalsWatched,
       assistsWatched,
+      yellowsWatched,
+      redsWatched,
     });
   }
 
@@ -339,6 +413,8 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
     totalMatches: appearances.length,
     totalGoals: appearances.reduce((s, a) => s + a.goalsWatched, 0),
     totalAssists: appearances.reduce((s, a) => s + a.assistsWatched, 0),
+    totalYellows: appearances.reduce((s, a) => s + a.yellowsWatched, 0),
+    totalReds: appearances.reduce((s, a) => s + a.redsWatched, 0),
     appearances,
   };
 }

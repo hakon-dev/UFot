@@ -201,6 +201,13 @@ export interface MatchDetailResult {
     playerOutId: number | null;
     playerInId: number | null;
   }>;
+  cards: Array<{
+    minute: number;
+    team: string;
+    playerName: string;
+    playerId: number | null;
+    cardType: "YELLOW" | "RED" | "YELLOWRED";
+  }>;
   homeLineup: LineupPlayerDetail[];
   awayLineup: LineupPlayerDetail[];
   homeFormation: string | null;
@@ -213,6 +220,14 @@ function mapGoalType(detail: string): string {
   if (detail === "Own Goal") return "OWN_GOAL";
   if (detail === "Penalty") return "PENALTY";
   return "REGULAR";
+}
+
+function mapCardType(detail: string): "YELLOW" | "RED" | "YELLOWRED" | null {
+  const d = detail.toLowerCase();
+  if (d.includes("second yellow")) return "YELLOWRED";
+  if (d.includes("red")) return "RED";
+  if (d.includes("yellow")) return "YELLOW";
+  return null;
 }
 
 function mapLineupPlayers(
@@ -340,6 +355,7 @@ export async function fetchMatchDetails(
     (e) => e.type === "Goal" && e.detail !== "Missed Penalty"
   );
   const subEvents = events.response.filter((e) => e.type === "subst");
+  const cardEvents = events.response.filter((e) => e.type === "Card");
 
   return {
     goals: goalEvents.map((e) => ({
@@ -359,6 +375,19 @@ export async function fetchMatchDetails(
       playerOutId: e.player.id ?? null,
       playerInId: e.assist.id ?? null,
     })),
+    cards: cardEvents
+      .map((e) => {
+        const cardType = mapCardType(e.detail);
+        if (!cardType) return null;
+        return {
+          minute: e.time.elapsed,
+          team: e.team.name,
+          playerName: e.player.name ?? "",
+          playerId: e.player.id ?? null,
+          cardType,
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null),
     homeLineup: mapLineupPlayers(homeLineup),
     awayLineup: mapLineupPlayers(awayLineup),
     homeFormation: homeLineup?.formation ?? null,

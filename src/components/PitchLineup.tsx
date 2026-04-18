@@ -11,6 +11,16 @@ export interface PitchPlayer {
   grid: string | null;
 }
 
+export interface PlayerAnnotations {
+  goals: number[]; // minutes
+  assists: number[]; // minutes
+  yellow: number | null; // minute
+  red: number | null; // minute (direct red or second yellow resolution)
+  subOff: number | null; // minute
+  nationality: string | null;
+  countryCode: string | null;
+}
+
 interface PitchLineupProps {
   homeTeam: string;
   awayTeam: string;
@@ -20,6 +30,7 @@ interface PitchLineupProps {
   awayFormation: string | null;
   homeStarters: PitchPlayer[];
   awayStarters: PitchPlayer[];
+  getAnnotations: (player: PitchPlayer, side: "home" | "away") => PlayerAnnotations;
 }
 
 function parseGrid(grid: string | null): { row: number; col: number } | null {
@@ -81,12 +92,88 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+function CardBadge({ yellow, red }: { yellow: number | null; red: number | null }) {
+  // Red always overrides yellow visually (player ended up off).
+  if (red != null) {
+    return (
+      <span
+        title={`Red card ${red}'`}
+        className="absolute -top-1 -right-1 w-2.5 h-3 bg-red-500 rounded-[1px] ring-1 ring-card shadow"
+      />
+    );
+  }
+  if (yellow != null) {
+    return (
+      <span
+        title={`Yellow card ${yellow}'`}
+        className="absolute -top-1 -right-1 w-2.5 h-3 bg-yellow-400 rounded-[1px] ring-1 ring-card shadow"
+      />
+    );
+  }
+  return null;
+}
+
+function SubOffBadge({ minute }: { minute: number }) {
+  return (
+    <span
+      title={`Subbed off ${minute}'`}
+      className="absolute -top-1 -left-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center ring-1 ring-card leading-none"
+    >
+      ↓
+    </span>
+  );
+}
+
+function EventIcons({
+  goals,
+  assists,
+  yellow,
+  red,
+  subOff,
+}: {
+  goals: number[];
+  assists: number[];
+  yellow: number | null;
+  red: number | null;
+  subOff: number | null;
+}) {
+  const hasAny =
+    goals.length > 0 ||
+    assists.length > 0 ||
+    yellow != null ||
+    red != null ||
+    subOff != null;
+  if (!hasAny) return null;
+
+  return (
+    <div className="flex items-center justify-center gap-0.5 flex-wrap max-w-[70px]">
+      {goals.length > 0 && (
+        <span className="text-[9px] text-white" title={`Goals: ${goals.join("', ")}'`}>
+          ⚽{goals.length > 1 ? `×${goals.length}` : ""}
+        </span>
+      )}
+      {assists.length > 0 && (
+        <span className="text-[9px] text-accent" title={`Assists: ${assists.join("', ")}'`}>
+          🅰{assists.length > 1 ? `×${assists.length}` : ""}
+        </span>
+      )}
+      {subOff != null && (
+        <span className="text-[9px] text-red-400 tabular-nums" title={`Off ${subOff}'`}>
+          ↓{subOff}&apos;
+        </span>
+      )}
+    </div>
+  );
+}
+
 function PlayerDot({
   player,
   side,
+  annotations,
 }: {
   player: PitchPlayer;
   side: "home" | "away";
+  annotations: PlayerAnnotations;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
   const photo =
@@ -95,11 +182,14 @@ function PlayerDot({
       : null;
 
   const accentRing = side === "home" ? "ring-accent/70" : "ring-white/40";
+  const dimmed = annotations.subOff != null || annotations.red != null;
 
   const dot = (
-    <div className="flex flex-col items-center gap-1 group">
+    <div className="flex flex-col items-center gap-0.5 group">
       <div
-        className={`relative w-11 h-11 md:w-12 md:h-12 rounded-full bg-surface ring-2 ${accentRing} overflow-hidden flex items-center justify-center group-hover:ring-accent transition-all`}
+        className={`relative w-10 h-10 md:w-11 md:h-11 rounded-full bg-surface ring-2 ${accentRing} overflow-hidden flex items-center justify-center group-hover:ring-accent transition-all ${
+          dimmed ? "opacity-60" : ""
+        }`}
       >
         {photo && !imgFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -119,10 +209,32 @@ function PlayerDot({
             {player.shirtNumber}
           </span>
         )}
+        <CardBadge yellow={annotations.yellow} red={annotations.red} />
+        {annotations.subOff != null && annotations.red == null && (
+          <SubOffBadge minute={annotations.subOff} />
+        )}
       </div>
-      <span className="text-[10px] md:text-[11px] text-white font-medium leading-tight text-center max-w-[70px] truncate">
-        {player.name.split(" ").slice(-1)[0]}
-      </span>
+      <div className="flex items-center justify-center gap-1 max-w-[80px]">
+        {annotations.countryCode && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`https://flagcdn.com/${annotations.countryCode}.svg`}
+            alt={annotations.nationality ?? ""}
+            title={annotations.nationality ?? ""}
+            className="w-3 h-2 object-cover rounded-[1px] shrink-0"
+          />
+        )}
+        <span className="text-[10px] md:text-[11px] text-white font-medium leading-tight truncate">
+          {player.name.split(" ").slice(-1)[0]}
+        </span>
+      </div>
+      <EventIcons
+        goals={annotations.goals}
+        assists={annotations.assists}
+        yellow={annotations.yellow}
+        red={annotations.red}
+        subOff={annotations.subOff}
+      />
     </div>
   );
 
@@ -138,10 +250,12 @@ function TeamHalf({
   players,
   formation,
   side,
+  getAnnotations,
 }: {
   players: PitchPlayer[];
   formation: string | null;
   side: "home" | "away";
+  getAnnotations: (player: PitchPlayer, side: "home" | "away") => PlayerAnnotations;
 }) {
   const placed = withGrid(players, formation);
   const maxRow = Math.max(1, ...placed.map((p) => p.row));
@@ -162,22 +276,23 @@ function TeamHalf({
       {Array.from(rowGroups.entries()).map(([row, rowPlayers]) => {
         // Row 1 (GK) near the outer endline, higher rows toward midfield.
         const rowFrac = (row - 0.5) / (maxRow + 0.25);
-        // Home half occupies bottom 50%: near endline = bottom, midfield = top of home half.
-        // Away half occupies top 50%: near endline = top, midfield = bottom of away half.
-        const topPct =
+        // Home half occupies left 50%: endline = left, midfield = right of home half.
+        // Away half occupies right 50%: endline = right, midfield = left of away half.
+        // Stretch across the full half: GK near endline (~5%), deepest row near the midline (~95%).
+        const leftPct =
           side === "home"
-            ? 100 - rowFrac * 48 - 2
-            : rowFrac * 48 + 2;
+            ? rowFrac * 90 + 5
+            : 95 - rowFrac * 90;
 
         return rowPlayers.map((p, i) => {
-          const leftPct = ((i + 1) / (rowPlayers.length + 1)) * 100;
+          const topPct = ((i + 1) / (rowPlayers.length + 1)) * 100;
           return (
             <div
               key={`${row}-${i}-${p.name}`}
               className="absolute -translate-x-1/2 -translate-y-1/2"
               style={{ top: `${topPct}%`, left: `${leftPct}%` }}
             >
-              <PlayerDot player={p} side={side} />
+              <PlayerDot player={p} side={side} annotations={getAnnotations(p, side)} />
             </div>
           );
         });
@@ -190,23 +305,24 @@ function PitchBackground() {
   return (
     <svg
       className="absolute inset-0 w-full h-full pointer-events-none"
-      viewBox="0 0 100 150"
+      viewBox="0 0 150 100"
       preserveAspectRatio="none"
     >
-      <rect x="0" y="0" width="100" height="150" fill="#0f2a0f" />
+      <rect x="0" y="0" width="150" height="100" fill="#0f2a0f" />
       <g stroke="rgba(255,255,255,0.18)" strokeWidth="0.3" fill="none">
-        <rect x="2" y="2" width="96" height="146" />
-        <line x1="2" y1="75" x2="98" y2="75" />
-        <circle cx="50" cy="75" r="9" />
-        <circle cx="50" cy="75" r="0.6" fill="rgba(255,255,255,0.4)" />
-        {/* Penalty boxes */}
-        <rect x="22" y="2" width="56" height="16" />
-        <rect x="35" y="2" width="30" height="6" />
-        <rect x="22" y="132" width="56" height="16" />
-        <rect x="35" y="142" width="30" height="6" />
+        <rect x="2" y="2" width="146" height="96" />
+        <line x1="75" y1="2" x2="75" y2="98" />
+        <circle cx="75" cy="50" r="9" />
+        <circle cx="75" cy="50" r="0.6" fill="rgba(255,255,255,0.4)" />
+        {/* Left penalty box (home) */}
+        <rect x="2" y="22" width="16" height="56" />
+        <rect x="2" y="35" width="6" height="30" />
+        {/* Right penalty box (away) */}
+        <rect x="132" y="22" width="16" height="56" />
+        <rect x="142" y="35" width="6" height="30" />
         {/* Penalty spots */}
-        <circle cx="50" cy="13" r="0.5" fill="rgba(255,255,255,0.4)" />
-        <circle cx="50" cy="137" r="0.5" fill="rgba(255,255,255,0.4)" />
+        <circle cx="13" cy="50" r="0.5" fill="rgba(255,255,255,0.4)" />
+        <circle cx="137" cy="50" r="0.5" fill="rgba(255,255,255,0.4)" />
       </g>
     </svg>
   );
@@ -221,25 +337,39 @@ export default function PitchLineup({
   awayFormation,
   homeStarters,
   awayStarters,
+  getAnnotations,
 }: PitchLineupProps) {
   return (
     <div className="space-y-3">
       {/* Team headers */}
       <div className="flex items-center justify-between text-xs">
-        <TeamHeader name={awayTeam} teamId={awayTeamId} formation={awayFormation} align="left" />
-        <TeamHeader name={homeTeam} teamId={homeTeamId} formation={homeFormation} align="right" />
+        <TeamHeader name={homeTeam} teamId={homeTeamId} formation={homeFormation} align="left" />
+        <TeamHeader name={awayTeam} teamId={awayTeamId} formation={awayFormation} align="right" />
       </div>
 
       {/* Pitch */}
-      <div className="relative w-full rounded-xl overflow-hidden border border-card-border" style={{ aspectRatio: "2 / 3" }}>
+      <div
+        className="relative w-full rounded-xl overflow-hidden border border-card-border mx-auto"
+        style={{ aspectRatio: "3 / 2", maxHeight: "70vh" }}
+      >
         <PitchBackground />
-        {/* Away (top half) */}
-        <div className="absolute inset-x-0 top-0 h-1/2">
-          <TeamHalf players={awayStarters} formation={awayFormation} side="away" />
+        {/* Home (left half) */}
+        <div className="absolute inset-y-0 left-0 w-1/2">
+          <TeamHalf
+            players={homeStarters}
+            formation={homeFormation}
+            side="home"
+            getAnnotations={getAnnotations}
+          />
         </div>
-        {/* Home (bottom half) */}
-        <div className="absolute inset-x-0 bottom-0 h-1/2">
-          <TeamHalf players={homeStarters} formation={homeFormation} side="home" />
+        {/* Away (right half) */}
+        <div className="absolute inset-y-0 right-0 w-1/2">
+          <TeamHalf
+            players={awayStarters}
+            formation={awayFormation}
+            side="away"
+            getAnnotations={getAnnotations}
+          />
         </div>
       </div>
     </div>

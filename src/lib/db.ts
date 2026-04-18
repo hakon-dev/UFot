@@ -112,6 +112,18 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS match_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+    minute INTEGER NOT NULL,
+    team TEXT NOT NULL,
+    player_name TEXT NOT NULL,
+    player_id INTEGER,
+    card_type TEXT NOT NULL
+  )
+`);
+
 const lineupColumns = (db.prepare("PRAGMA table_info(match_lineups)").all() as { name: string }[]).map((c) => c.name);
 if (!lineupColumns.includes("player_id")) {
   db.exec("ALTER TABLE match_lineups ADD COLUMN player_id INTEGER");
@@ -158,13 +170,13 @@ db.exec(`
   )
 `);
 
-// One-shot migration (user_version=1): once scorer_id/assist_id columns exist,
-// force a re-fetch of every api-football match so we pick up the IDs for goal events.
-// Uses SQLite's user_version pragma (not the schema-drift block below) to guarantee
-// it runs exactly once — otherwise rows whose API payload legitimately returns null
-// IDs would trigger a re-fetch on every server restart.
+// One-shot migrations using SQLite's user_version pragma (not the schema-drift block below) —
+// guarantees each runs exactly once. Without this, rows whose API payload legitimately returns
+// null IDs (or no cards) would trigger a re-fetch on every server restart.
+//   v1 — scorer_id/assist_id landed; force a re-fetch so existing rows pick them up.
+//   v2 — match_cards table added; force a re-fetch so existing rows get card events.
 const userVersion = db.pragma("user_version", { simple: true }) as number;
-if (userVersion < 1) {
+if (userVersion < 2) {
   db.exec(`
     UPDATE matches
     SET details_fetched = 0
@@ -173,7 +185,8 @@ if (userVersion < 1) {
   db.exec(`DELETE FROM match_goals WHERE match_id IN (SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football')`);
   db.exec(`DELETE FROM match_substitutions WHERE match_id IN (SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football')`);
   db.exec(`DELETE FROM match_lineups WHERE match_id IN (SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football')`);
-  db.pragma("user_version = 1");
+  db.exec(`DELETE FROM match_cards WHERE match_id IN (SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football')`);
+  db.pragma("user_version = 2");
 }
 
 // Re-hydrate lazy-fetched details for api-football matches that predate either the formation/grid
@@ -205,6 +218,11 @@ db.exec(`
 `);
 db.exec(`
   DELETE FROM match_lineups WHERE match_id IN (
+    SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football'
+  )
+`);
+db.exec(`
+  DELETE FROM match_cards WHERE match_id IN (
     SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football'
   )
 `);
@@ -267,6 +285,16 @@ export interface MatchLineup {
   grid_position: string | null;
 }
 
+export interface MatchCard {
+  id: number;
+  match_id: string;
+  minute: number;
+  team: string;
+  player_name: string;
+  player_id: number | null;
+  card_type: string; // 'YELLOW' | 'RED' | 'YELLOWRED'
+}
+
 export function getAllMatches(): Match[] {
   return db.prepare("SELECT * FROM matches ORDER BY date DESC, created_at DESC").all() as Match[];
 }
@@ -318,6 +346,7 @@ export function saveMatchDetails(
   goals: Omit<MatchGoal, "id" | "match_id">[],
   substitutions: Omit<MatchSubstitution, "id" | "match_id">[],
   lineups: Omit<MatchLineup, "id" | "match_id">[],
+  cards: Omit<MatchCard, "id" | "match_id">[],
   meta?: {
     homeFormation?: string | null;
     awayFormation?: string | null;
@@ -333,6 +362,9 @@ export function saveMatchDetails(
   );
   const insertLineup = db.prepare(
     "INSERT INTO match_lineups (match_id, team, player_name, position, shirt_number, is_starter, player_id, grid_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const insertCard = db.prepare(
+    "INSERT INTO match_cards (match_id, minute, team, player_name, player_id, card_type) VALUES (?, ?, ?, ?, ?, ?)"
   );
 
   const transaction = db.transaction(() => {
@@ -352,6 +384,11 @@ export function saveMatchDetails(
       insertLineup.run(
         matchId, l.team, l.player_name, l.position ?? null, l.shirt_number ?? null, l.is_starter,
         l.player_id ?? null, l.grid_position ?? null
+      );
+    }
+    for (const c of cards) {
+      insertCard.run(
+        matchId, c.minute, c.team, c.player_name, c.player_id ?? null, c.card_type
       );
     }
     if (meta) {
@@ -376,11 +413,13 @@ export function getMatchDetails(matchId: string): {
   goals: MatchGoal[];
   substitutions: MatchSubstitution[];
   lineups: MatchLineup[];
+  cards: MatchCard[];
 } {
   return {
     goals: db.prepare("SELECT * FROM match_goals WHERE match_id = ? ORDER BY minute").all(matchId) as MatchGoal[],
     substitutions: db.prepare("SELECT * FROM match_substitutions WHERE match_id = ? ORDER BY minute").all(matchId) as MatchSubstitution[],
     lineups: db.prepare("SELECT * FROM match_lineups WHERE match_id = ? ORDER BY team, is_starter DESC, position, player_name").all(matchId) as MatchLineup[],
+    cards: db.prepare("SELECT * FROM match_cards WHERE match_id = ? ORDER BY minute").all(matchId) as MatchCard[],
   };
 }
 
@@ -388,6 +427,7 @@ export function getMatchesWithDetails(): (Match & {
   goals: MatchGoal[];
   substitutions: MatchSubstitution[];
   lineups: MatchLineup[];
+  cards: MatchCard[];
 })[] {
   const matches = db.prepare("SELECT * FROM matches WHERE details_fetched = 1").all() as Match[];
   return matches.map((m) => ({

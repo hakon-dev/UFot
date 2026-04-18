@@ -39,11 +39,13 @@ export default async function PlayerPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard label="Minutes" value={player.totalMinutes} />
         <StatCard label="Matches" value={player.totalMatches} />
         <StatCard label="Goals" value={player.totalGoals} />
         <StatCard label="Assists" value={player.totalAssists} />
+        <StatCard label="Yellows" value={player.totalYellows} accent="yellow" />
+        <StatCard label="Reds" value={player.totalReds} accent="red" />
       </div>
 
       <div className={cardClass}>
@@ -85,6 +87,16 @@ export default async function PlayerPage({
                   {a.assistsWatched}A
                 </span>
               )}
+              {a.yellowsWatched > 0 && (
+                <span className="text-xs text-yellow-400 shrink-0 tabular-nums">
+                  {a.yellowsWatched}Y
+                </span>
+              )}
+              {a.redsWatched > 0 && (
+                <span className="text-xs text-red-400 shrink-0 tabular-nums">
+                  {a.redsWatched}R
+                </span>
+              )}
               <span className="text-xs text-muted shrink-0 tabular-nums">
                 {new Date(a.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
               </span>
@@ -96,11 +108,21 @@ export default async function PlayerPage({
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string | number }) {
+function StatCard({
+  label,
+  value,
+  accent = "accent",
+}: {
+  label: string;
+  value: string | number;
+  accent?: "accent" | "yellow" | "red";
+}) {
+  const color =
+    accent === "yellow" ? "text-yellow-400" : accent === "red" ? "text-red-400" : "text-accent";
   return (
     <div className="bg-card rounded-xl p-4 border border-card-border">
       <p className="text-xs text-muted">{label}</p>
-      <p className="text-2xl font-bold text-accent mt-1 tabular-nums">{value}</p>
+      <p className={`text-2xl font-bold mt-1 tabular-nums ${color}`}>{value}</p>
     </div>
   );
 }

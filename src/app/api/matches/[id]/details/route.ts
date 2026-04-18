@@ -1,6 +1,15 @@
-import { getMatch, getMatchDetails, saveMatchDetails } from "@/lib/db";
+import { getMatch, getMatchDetails, saveMatchDetails, type MatchLineup } from "@/lib/db";
 import { fetchMatchDetails } from "@/lib/football-api";
+import { getPlayerNationalities } from "@/lib/player-stats";
 import { NextRequest, NextResponse } from "next/server";
+
+async function withNationalities(lineups: MatchLineup[]) {
+  const ids = lineups.map((l) => l.player_id).filter((id): id is number => id != null);
+  const nationalities = await getPlayerNationalities(ids);
+  return Object.fromEntries(
+    [...nationalities.entries()].map(([id, n]) => [id, n])
+  );
+}
 
 export async function GET(
   _request: NextRequest,
@@ -15,12 +24,14 @@ export async function GET(
   // Already cached
   if (match.details_fetched) {
     const details = getMatchDetails(id);
+    const nationalities = await withNationalities(details.lineups);
     return NextResponse.json({
       available: true,
       homeFormation: match.home_formation,
       awayFormation: match.away_formation,
       homeTeamId: match.home_team_id,
       awayTeamId: match.away_team_id,
+      nationalities,
       ...details,
     });
   }
@@ -72,6 +83,13 @@ export async function GET(
           grid_position: p.grid,
         })),
       ],
+      details.cards.map((c) => ({
+        minute: c.minute,
+        team: c.team,
+        player_name: c.playerName,
+        player_id: c.playerId,
+        card_type: c.cardType,
+      })),
       {
         homeFormation: details.homeFormation,
         awayFormation: details.awayFormation,
@@ -82,12 +100,14 @@ export async function GET(
 
     const saved = getMatchDetails(id);
     const refreshed = getMatch(id);
+    const nationalities = await withNationalities(saved.lineups);
     return NextResponse.json({
       available: true,
       homeFormation: refreshed?.home_formation ?? null,
       awayFormation: refreshed?.away_formation ?? null,
       homeTeamId: refreshed?.home_team_id ?? null,
       awayTeamId: refreshed?.away_team_id ?? null,
+      nationalities,
       ...saved,
     });
   } catch {
