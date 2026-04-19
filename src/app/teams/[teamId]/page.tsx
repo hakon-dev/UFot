@@ -52,7 +52,7 @@ export default async function TeamPage({
         <StatCard label="Wins" value={team.wins} />
         <StatCard label="Draws" value={team.draws} />
         <StatCard label="Losses" value={team.losses} />
-        <StatCard label="Eq. Matches" value={(team.totalMinutes / 90).toFixed(1)} />
+        <StatCard label="Matches" value={team.totalMatches} />
         <StatCard label="Goals For" value={team.goalsFor} />
         <StatCard label="Goals Against" value={team.goalsAgainst} />
         <StatCard label="Goal Diff" value={team.goalsFor - team.goalsAgainst >= 0 ? `+${team.goalsFor - team.goalsAgainst}` : `${team.goalsFor - team.goalsAgainst}`} />

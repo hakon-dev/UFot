@@ -1,7 +1,10 @@
-import type { Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard } from "./db";
-import { getMatchesWithDetails, getPlayers, upsertPlayer } from "./db";
+import type { Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard, PlayerTransferRecord } from "./db";
+import {
+  getMatchesWithDetails, getPlayers, upsertPlayer,
+  getPlayerTransfers, replacePlayerTransfers, hasFetchedPlayerTransfers,
+} from "./db";
 import { countryNameToCode } from "./country-codes";
-import { fetchPlayerProfile } from "./football-api";
+import { fetchPlayerProfile, fetchPlayerTransfers } from "./football-api";
 
 export interface PlayerStat {
   playerId: number | null;
@@ -76,6 +79,33 @@ function lookupSubMinute(
   return map.get(`name:${name}`);
 }
 
+// Build a global name → canonical id map across every lineup/goal/sub/card record.
+// Without this, a player who appeared in match A with player_id=null (e.g. a goal event whose
+// scorer name doesn't match any lineup name — "M. Ødegaard" vs "Martin Ødegaard") and in match B
+// with player_id=123 would produce two separate stat rows, each with matches=1.
+function buildGlobalNameToId(matches: MatchWithDetails[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const match of matches) {
+    for (const l of match.lineups) {
+      if (l.player_id != null && !map.has(l.player_name)) map.set(l.player_name, l.player_id);
+    }
+    for (const g of match.goals) {
+      if (g.scorer_id != null && !map.has(g.scorer_name)) map.set(g.scorer_name, g.scorer_id);
+      if (g.assist_id != null && g.assist_name && !map.has(g.assist_name)) {
+        map.set(g.assist_name, g.assist_id);
+      }
+    }
+    for (const s of match.substitutions) {
+      if (s.player_in_id != null && !map.has(s.player_in)) map.set(s.player_in, s.player_in_id);
+      if (s.player_out_id != null && !map.has(s.player_out)) map.set(s.player_out, s.player_out_id);
+    }
+    for (const c of match.cards) {
+      if (c.player_id != null && !map.has(c.player_name)) map.set(c.player_name, c.player_id);
+    }
+  }
+  return map;
+}
+
 export interface ComputeOptions {
   onlyTeamId?: number;
 }
@@ -88,20 +118,35 @@ export function computePlayerStats(
   const latestClubDate = new Map<string, string>();
   const { onlyTeamId } = options;
 
+  const globalNameToId = buildGlobalNameToId(matches);
+
   function ensure(playerId: number | null, name: string): PlayerStat {
-    const key = playerKey(playerId, name);
+    // Resolve name-only calls to their canonical id when we've seen one anywhere.
+    const resolvedId = playerId ?? globalNameToId.get(name) ?? null;
+    const key = playerKey(resolvedId, name);
+
     let s = stats.get(key);
-    if (!s) {
-      s = {
-        playerId, name, minutesWatched: 0, matches: 0, goalsWatched: 0, assistsWatched: 0,
-        yellowsWatched: 0, redsWatched: 0,
-        club: null, clubId: null, clubCrest: null, nationality: null, countryCode: null,
-      };
-      stats.set(key, s);
-    } else if (s.playerId == null && playerId != null) {
-      // Upgrade a name-only entry once we see the ID.
-      s.playerId = playerId;
+    if (s) return s;
+
+    // When we just learned the id, fold any pre-existing name-only entry into it.
+    if (resolvedId != null) {
+      const nameKey = `name:${name}`;
+      const orphan = stats.get(nameKey);
+      if (orphan) {
+        stats.delete(nameKey);
+        latestClubDate.delete(nameKey);
+        orphan.playerId = resolvedId;
+        stats.set(key, orphan);
+        return orphan;
+      }
     }
+
+    s = {
+      playerId: resolvedId, name, minutesWatched: 0, matches: 0, goalsWatched: 0, assistsWatched: 0,
+      yellowsWatched: 0, redsWatched: 0,
+      club: null, clubId: null, clubCrest: null, nationality: null, countryCode: null,
+    };
+    stats.set(key, s);
     return s;
   }
 
@@ -113,7 +158,8 @@ export function computePlayerStats(
     clubId: number | null,
     clubCrest: string | null
   ): void {
-    const key = playerKey(playerId, name);
+    const resolvedId = playerId ?? globalNameToId.get(name) ?? null;
+    const key = playerKey(resolvedId, name);
     const prev = latestClubDate.get(key);
     if (prev && prev >= matchDate) return;
     latestClubDate.set(key, matchDate);
@@ -244,6 +290,8 @@ export async function getPlayerNationalities(
           nationality: profile.nationality,
           countryCode: code,
           photo: profile.photo,
+          position: profile.position,
+          shirtNumber: profile.shirtNumber,
         });
         result.set(id, { nationality: profile.nationality, countryCode: code });
       } catch {
@@ -292,6 +340,8 @@ export async function enrichPlayerStatsWithNationality(
           nationality: profile.nationality,
           countryCode: code,
           photo: profile.photo,
+          position: profile.position,
+          shirtNumber: profile.shirtNumber,
         });
         s.nationality = profile.nationality;
         s.countryCode = code;
@@ -323,6 +373,8 @@ export interface PlayerProfile {
   playerId: number;
   name: string;
   photoUrl: string;
+  latestPosition: string | null;
+  latestShirt: number | null;
   totalMinutes: number;
   totalMatches: number;
   totalGoals: number;
@@ -334,18 +386,41 @@ export interface PlayerProfile {
 
 export function getPlayerProfile(playerId: number): PlayerProfile | null {
   const matches = getMatchesWithDetails();
+
+  // Collect every name this id has been credited with across lineups/events, so we can
+  // match lineup rows whose player_id is null but whose name appears under this id elsewhere.
+  const knownNames = new Set<string>();
+  for (const match of matches) {
+    for (const l of match.lineups) if (l.player_id === playerId) knownNames.add(l.player_name);
+    for (const g of match.goals) {
+      if (g.scorer_id === playerId) knownNames.add(g.scorer_name);
+      if (g.assist_id === playerId && g.assist_name) knownNames.add(g.assist_name);
+    }
+    for (const s of match.substitutions) {
+      if (s.player_in_id === playerId) knownNames.add(s.player_in);
+      if (s.player_out_id === playerId) knownNames.add(s.player_out);
+    }
+    for (const c of match.cards) if (c.player_id === playerId) knownNames.add(c.player_name);
+  }
+
   let latestName: string | null = null;
   let latestDate = "";
+  let latestPosition: string | null = null;
+  let latestShirt: number | null = null;
   const appearances: PlayerMatchAppearance[] = [];
 
   for (const match of matches) {
     const watchIntervals = parseIntervals(match.watch_intervals);
-    const lineup = match.lineups.find((l) => l.player_id === playerId);
+    const lineup =
+      match.lineups.find((l) => l.player_id === playerId) ??
+      match.lineups.find((l) => l.player_id == null && knownNames.has(l.player_name));
     if (!lineup) continue;
 
     if (!latestName || match.date > latestDate) {
       latestName = lineup.player_name;
       latestDate = match.date;
+      latestPosition = lineup.position;
+      latestShirt = lineup.shirt_number;
     }
 
     const subbedOut = buildSubMap(match.substitutions, "out");
@@ -409,6 +484,8 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
     playerId,
     name: latestName,
     photoUrl: `https://media.api-sports.io/football/players/${playerId}.png`,
+    latestPosition,
+    latestShirt,
     totalMinutes: appearances.reduce((s, a) => s + a.minutesWatched, 0),
     totalMatches: appearances.length,
     totalGoals: appearances.reduce((s, a) => s + a.goalsWatched, 0),
@@ -417,4 +494,117 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
     totalReds: appearances.reduce((s, a) => s + a.redsWatched, 0),
     appearances,
   };
+}
+
+export interface PlayerHeader {
+  playerId: number;
+  name: string;
+  photoUrl: string;
+  nationality: string | null;
+  countryCode: string | null;
+  position: string | null;
+  shirtNumber: number | null;
+  clubId: number | null;
+  clubName: string | null;
+  clubCrest: string | null;
+}
+
+// Build the player page header from all available sources. Falls back cleanly so the page never 404s:
+// even with zero watched appearances, the players cache (or a lazy /players/profiles fetch) can supply
+// a usable header.
+export async function getPlayerHeader(
+  playerId: number,
+  profile: PlayerProfile | null
+): Promise<PlayerHeader> {
+  let cache = getPlayers([playerId]).get(playerId) ?? null;
+
+  if (!cache) {
+    try {
+      const fetched = await fetchPlayerProfile(playerId);
+      if (fetched) {
+        const code = countryNameToCode(fetched.nationality);
+        upsertPlayer({
+          id: fetched.id,
+          name: fetched.name,
+          nationality: fetched.nationality,
+          countryCode: code,
+          photo: fetched.photo,
+          position: fetched.position,
+          shirtNumber: fetched.shirtNumber,
+        });
+        cache = getPlayers([playerId]).get(playerId) ?? null;
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  const transfers = await getPlayerTransferHistory(playerId);
+  const mostRecentClub = transfers.find(
+    (t) => t.teamIn.id != null && t.teamIn.name
+  );
+
+  const name = profile?.name ?? cache?.name ?? `Player ${playerId}`;
+  const photoUrl =
+    profile?.photoUrl ?? cache?.photo ?? `https://media.api-sports.io/football/players/${playerId}.png`;
+
+  return {
+    playerId,
+    name,
+    photoUrl,
+    nationality: cache?.nationality ?? null,
+    countryCode: cache?.country_code ?? null,
+    position: cache?.position ?? profile?.latestPosition ?? null,
+    shirtNumber: cache?.shirt_number ?? profile?.latestShirt ?? null,
+    clubId: mostRecentClub?.teamIn.id ?? null,
+    clubName: mostRecentClub?.teamIn.name ?? null,
+    clubCrest: mostRecentClub?.teamIn.logo ?? null,
+  };
+}
+
+export interface PlayerTransferHistoryEntry {
+  date: string;
+  type: string | null;
+  teamIn: { id: number | null; name: string | null; logo: string | null };
+  teamOut: { id: number | null; name: string | null; logo: string | null };
+}
+
+function rowToTransfer(r: PlayerTransferRecord): PlayerTransferHistoryEntry {
+  return {
+    date: r.transfer_date,
+    type: r.type,
+    teamIn: { id: r.team_in_id, name: r.team_in_name, logo: r.team_in_logo },
+    teamOut: { id: r.team_out_id, name: r.team_out_name, logo: r.team_out_logo },
+  };
+}
+
+// Read cache first; if we've never fetched this player's transfers, fetch once and persist.
+// Cached rows are keyed per player, so re-calling on a player we've already fetched costs no
+// API requests even if their cached history is empty.
+export async function getPlayerTransferHistory(
+  playerId: number
+): Promise<PlayerTransferHistoryEntry[]> {
+  if (hasFetchedPlayerTransfers(playerId)) {
+    return getPlayerTransfers(playerId).map(rowToTransfer);
+  }
+
+  try {
+    const transfers = await fetchPlayerTransfers(playerId);
+    replacePlayerTransfers(
+      playerId,
+      transfers.map((t) => ({
+        transferDate: t.date,
+        type: t.type,
+        teamInId: t.teamIn.id,
+        teamInName: t.teamIn.name,
+        teamInLogo: t.teamIn.logo,
+        teamOutId: t.teamOut.id,
+        teamOutName: t.teamOut.name,
+        teamOutLogo: t.teamOut.logo,
+      }))
+    );
+    return getPlayerTransfers(playerId).map(rowToTransfer);
+  } catch {
+    return [];
+  }
 }

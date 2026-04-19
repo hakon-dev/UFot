@@ -47,6 +47,12 @@ interface NationalityEntry {
   countryCode: string | null;
 }
 
+interface PlayerClubEntry {
+  name: string | null;
+  logo: string | null;
+  teamId: number | null;
+}
+
 interface MatchDetails {
   available: boolean;
   goals?: Goal[];
@@ -54,6 +60,9 @@ interface MatchDetails {
   lineups?: Lineup[];
   cards?: Card[];
   nationalities?: Record<string, NationalityEntry>;
+  playerClubs?: Record<string, PlayerClubEntry>;
+  homeIsNational?: boolean;
+  awayIsNational?: boolean;
   homeFormation?: string | null;
   awayFormation?: string | null;
   homeTeamId?: number | null;
@@ -182,6 +191,9 @@ export default function MatchDetailClient({
     const subs = details?.substitutions ?? [];
     const cards = details?.cards ?? [];
     const nationalities = details?.nationalities ?? {};
+    const playerClubs = details?.playerClubs ?? {};
+    const homeIsNational = details?.homeIsNational ?? false;
+    const awayIsNational = details?.awayIsNational ?? false;
 
     function keyFor(id: number | null, name: string): string {
       return id != null ? `id:${id}` : `name:${name}`;
@@ -224,8 +236,18 @@ export default function MatchDetailClient({
         }
       }
 
+      const sideIsNational = side === "home" ? homeIsNational : awayIsNational;
+      const clubEntry =
+        sideIsNational && player.playerId != null
+          ? playerClubs[String(player.playerId)]
+          : undefined;
+
       const nationalityEntry =
         player.playerId != null ? nationalities[String(player.playerId)] : undefined;
+
+      // On national-team sides, hide the (redundant) nationality flag — the club takes that slot.
+      const nationality = sideIsNational ? null : nationalityEntry?.nationality ?? null;
+      const countryCode = sideIsNational ? null : nationalityEntry?.countryCode ?? null;
 
       return {
         goals: scored,
@@ -233,8 +255,11 @@ export default function MatchDetailClient({
         yellow,
         red,
         subOff,
-        nationality: nationalityEntry?.nationality ?? null,
-        countryCode: nationalityEntry?.countryCode ?? null,
+        nationality,
+        countryCode,
+        clubName: clubEntry?.name ?? null,
+        clubLogo: clubEntry?.logo ?? null,
+        clubId: clubEntry?.teamId ?? null,
       };
     };
   }, [details, homeTeam, awayTeam]);

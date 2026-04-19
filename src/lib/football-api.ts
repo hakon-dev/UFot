@@ -262,6 +262,8 @@ interface ApiFootballPlayerProfile {
     lastname: string | null;
     nationality: string | null;
     photo: string | null;
+    position: string | null;
+    number: number | null;
   };
 }
 
@@ -270,6 +272,8 @@ export interface PlayerProfileResult {
   name: string;
   nationality: string | null;
   photo: string | null;
+  position: string | null;
+  shirtNumber: number | null;
 }
 
 interface ApiFootballTeamProfile {
@@ -278,6 +282,7 @@ interface ApiFootballTeamProfile {
     name: string;
     country: string | null;
     logo: string | null;
+    national: boolean | null;
   };
 }
 
@@ -286,6 +291,7 @@ export interface TeamProfileResult {
   name: string;
   country: string | null;
   logo: string | null;
+  national: boolean | null;
 }
 
 export async function fetchTeamProfile(
@@ -303,6 +309,7 @@ export async function fetchTeamProfile(
     name: row.team.name,
     country: row.team.country ?? null,
     logo: row.team.logo ?? null,
+    national: row.team.national ?? null,
   };
 }
 
@@ -322,7 +329,66 @@ export async function fetchPlayerProfile(
     name: p.name,
     nationality: p.nationality ?? null,
     photo: p.photo ?? null,
+    position: p.position ?? null,
+    shirtNumber: p.number ?? null,
   };
+}
+
+interface ApiFootballTransferTeam {
+  id: number | null;
+  name: string | null;
+  logo: string | null;
+}
+
+interface ApiFootballTransferRow {
+  date: string;
+  type: string | null;
+  teams: { in: ApiFootballTransferTeam; out: ApiFootballTransferTeam };
+}
+
+interface ApiFootballTransfers {
+  player: { id: number; name: string };
+  transfers: ApiFootballTransferRow[];
+}
+
+export interface PlayerTransfer {
+  date: string;
+  type: string | null;
+  teamIn: { id: number | null; name: string | null; logo: string | null };
+  teamOut: { id: number | null; name: string | null; logo: string | null };
+}
+
+export async function fetchPlayerTransfers(
+  playerId: number
+): Promise<PlayerTransfer[]> {
+  const res = await fetchApi(`/transfers?player=${playerId}`);
+  if (!res.ok) {
+    throw new Error(`api-football error: transfers ${res.status}`);
+  }
+  const data: ApiFootballResponse<ApiFootballTransfers> = await res.json();
+  const row = data.response?.[0];
+  if (!row) return [];
+  return row.transfers.map((t) => ({
+    date: t.date,
+    type: t.type ?? null,
+    teamIn: { id: t.teams.in.id ?? null, name: t.teams.in.name ?? null, logo: t.teams.in.logo ?? null },
+    teamOut: { id: t.teams.out.id ?? null, name: t.teams.out.name ?? null, logo: t.teams.out.logo ?? null },
+  }));
+}
+
+export async function fetchFixtureSummary(
+  fixtureId: number,
+  timeZone: string = "UTC"
+): Promise<MatchSearchResult | null> {
+  const tz = encodeURIComponent(timeZone);
+  const res = await fetchApi(`/fixtures?id=${fixtureId}&timezone=${tz}`);
+  if (!res.ok) {
+    throw new Error(`api-football error: fixtures ${res.status}`);
+  }
+  const data: ApiFootballResponse<ApiFootballFixture> = await res.json();
+  const row = data.response?.[0];
+  if (!row) return null;
+  return toMatchResult(row, timeZone);
 }
 
 export async function fetchMatchDetails(

@@ -159,6 +159,14 @@ db.exec(`
   )
 `);
 
+const playerColumns = (db.prepare("PRAGMA table_info(players)").all() as { name: string }[]).map((c) => c.name);
+if (!playerColumns.includes("position")) {
+  db.exec("ALTER TABLE players ADD COLUMN position TEXT");
+}
+if (!playerColumns.includes("shirt_number")) {
+  db.exec("ALTER TABLE players ADD COLUMN shirt_number INTEGER");
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY,
@@ -166,6 +174,38 @@ db.exec(`
     country TEXT,
     country_code TEXT,
     logo TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+const teamColumns = (db.prepare("PRAGMA table_info(teams)").all() as { name: string }[]).map((c) => c.name);
+if (!teamColumns.includes("national")) {
+  db.exec("ALTER TABLE teams ADD COLUMN national INTEGER");
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS player_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER NOT NULL,
+    transfer_date TEXT NOT NULL,
+    type TEXT,
+    team_in_id INTEGER,
+    team_in_name TEXT,
+    team_in_logo TEXT,
+    team_out_id INTEGER,
+    team_out_name TEXT,
+    team_out_logo TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_player_transfers_player ON player_transfers(player_id)`);
+
+// Track when we last fetched a player's transfers, separate from the players cache, so we can
+// distinguish "never fetched" (empty because no request made) from "fetched, player has no
+// transfers on record". Without this we'd re-fetch empty histories on every page view.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS player_transfer_fetches (
+    player_id INTEGER PRIMARY KEY,
     fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
   )
 `);
@@ -189,43 +229,15 @@ if (userVersion < 2) {
   db.pragma("user_version = 2");
 }
 
-// Re-hydrate lazy-fetched details for api-football matches that predate either the formation/grid
-// capture or the substitution player_id capture, so the next visit triggers a re-fetch with the
-// richer payload. Skipping rows without a drift signal avoids touching legacy football-data rows
-// (which cannot be re-fetched) and already-current rows.
-db.exec(`
-  UPDATE matches
-  SET details_fetched = 0
-  WHERE details_fetched = 1
-    AND external_source = 'api-football'
-    AND (
-      home_formation IS NULL
-      OR EXISTS (
-        SELECT 1 FROM match_substitutions s
-        WHERE s.match_id = matches.id AND s.player_in_id IS NULL
-      )
-    )
-`);
-db.exec(`
-  DELETE FROM match_goals WHERE match_id IN (
-    SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football'
-  )
-`);
-db.exec(`
-  DELETE FROM match_substitutions WHERE match_id IN (
-    SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football'
-  )
-`);
-db.exec(`
-  DELETE FROM match_lineups WHERE match_id IN (
-    SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football'
-  )
-`);
-db.exec(`
-  DELETE FROM match_cards WHERE match_id IN (
-    SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football'
-  )
-`);
+// NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null
+// home_formation or any sub with null player_in_id and purged the match's details so the
+// next visit would re-fetch. It was a bug: the API legitimately returns null for these
+// fields on some matches (players not in the API's database, or formations it doesn't
+// know), so the predicate fired on every single db.ts import, wiping cleanly-hydrated
+// matches over and over. The net effect was that a set of "unlucky" matches (e.g. Norway
+// vs Switzerland 2026-03-31, Everton vs Man United) never stayed hydrated — their players
+// were permanently missing from stats. Use `user_version` bumps (see above) for one-shot
+// schema migrations instead; those run exactly once.
 
 export interface Match {
   id: string;
@@ -303,6 +315,17 @@ export function getMatch(id: string): Match | undefined {
   return db.prepare("SELECT * FROM matches WHERE id = ?").get(id) as Match | undefined;
 }
 
+export function getMatchByExternalId(
+  externalMatchId: number,
+  externalSource: string = "api-football"
+): Match | undefined {
+  return db
+    .prepare(
+      "SELECT * FROM matches WHERE external_match_id = ? AND external_source = ?"
+    )
+    .get(externalMatchId, externalSource) as Match | undefined;
+}
+
 export function createMatch(data: {
   homeTeam: string;
   awayTeam: string;
@@ -368,6 +391,15 @@ export function saveMatchDetails(
   );
 
   const transaction = db.transaction(() => {
+    // Idempotent: clear any stale detail rows for this match before inserting. Without this,
+    // two racing hydration paths (POST-time + stats-page rescue, or concurrent detail-page
+    // opens) both read `details_fetched=0` and both insert, producing duplicate lineup/goal
+    // rows that inflate player stats.
+    db.prepare("DELETE FROM match_goals WHERE match_id = ?").run(matchId);
+    db.prepare("DELETE FROM match_substitutions WHERE match_id = ?").run(matchId);
+    db.prepare("DELETE FROM match_lineups WHERE match_id = ?").run(matchId);
+    db.prepare("DELETE FROM match_cards WHERE match_id = ?").run(matchId);
+
     for (const g of goals) {
       insertGoal.run(
         matchId, g.minute, g.team, g.scorer_name, g.assist_name ?? null, g.type ?? null,
@@ -440,12 +472,28 @@ export function deleteMatch(id: string): void {
   db.prepare("DELETE FROM matches WHERE id = ?").run(id);
 }
 
+export function getPendingHydrationIds(limit: number): string[] {
+  const rows = db
+    .prepare(
+      `SELECT id FROM matches
+       WHERE details_fetched = 0
+         AND external_source = 'api-football'
+         AND external_match_id IS NOT NULL
+       ORDER BY date DESC
+       LIMIT ?`
+    )
+    .all(limit) as { id: string }[];
+  return rows.map((r) => r.id);
+}
+
 export interface PlayerRecord {
   id: number;
   name: string;
   nationality: string | null;
   country_code: string | null;
   photo: string | null;
+  position: string | null;
+  shirt_number: number | null;
   fetched_at: string;
 }
 
@@ -466,17 +514,24 @@ export function upsertPlayer(record: {
   nationality: string | null;
   countryCode: string | null;
   photo: string | null;
+  position: string | null;
+  shirtNumber: number | null;
 }): void {
   db.prepare(
-    `INSERT INTO players (id, name, nationality, country_code, photo, fetched_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO players (id, name, nationality, country_code, photo, position, shirt_number, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        nationality = excluded.nationality,
        country_code = excluded.country_code,
        photo = excluded.photo,
+       position = excluded.position,
+       shirt_number = excluded.shirt_number,
        fetched_at = excluded.fetched_at`
-  ).run(record.id, record.name, record.nationality, record.countryCode, record.photo);
+  ).run(
+    record.id, record.name, record.nationality, record.countryCode, record.photo,
+    record.position, record.shirtNumber
+  );
 }
 
 export interface TeamRecord {
@@ -485,6 +540,7 @@ export interface TeamRecord {
   country: string | null;
   country_code: string | null;
   logo: string | null;
+  national: number | null;
   fetched_at: string;
 }
 
@@ -505,15 +561,97 @@ export function upsertTeam(record: {
   country: string | null;
   countryCode: string | null;
   logo: string | null;
+  national: boolean | null;
 }): void {
   db.prepare(
-    `INSERT INTO teams (id, name, country, country_code, logo, fetched_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO teams (id, name, country, country_code, logo, national, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        country = excluded.country,
        country_code = excluded.country_code,
        logo = excluded.logo,
+       national = excluded.national,
        fetched_at = excluded.fetched_at`
-  ).run(record.id, record.name, record.country, record.countryCode, record.logo);
+  ).run(
+    record.id, record.name, record.country, record.countryCode, record.logo,
+    record.national == null ? null : record.national ? 1 : 0
+  );
+}
+
+export interface PlayerTransferRecord {
+  id: number;
+  player_id: number;
+  transfer_date: string;
+  type: string | null;
+  team_in_id: number | null;
+  team_in_name: string | null;
+  team_in_logo: string | null;
+  team_out_id: number | null;
+  team_out_name: string | null;
+  team_out_logo: string | null;
+  fetched_at: string;
+}
+
+export function getPlayerTransfers(playerId: number): PlayerTransferRecord[] {
+  return db
+    .prepare("SELECT * FROM player_transfers WHERE player_id = ? ORDER BY transfer_date DESC")
+    .all(playerId) as PlayerTransferRecord[];
+}
+
+export function hasFetchedPlayerTransfers(playerId: number): boolean {
+  const row = db
+    .prepare("SELECT 1 AS x FROM player_transfer_fetches WHERE player_id = ?")
+    .get(playerId) as { x: number } | undefined;
+  return row != null;
+}
+
+export function fetchedPlayerTransferIds(playerIds: number[]): Set<number> {
+  const out = new Set<number>();
+  if (playerIds.length === 0) return out;
+  const placeholders = playerIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT player_id FROM player_transfer_fetches WHERE player_id IN (${placeholders})`)
+    .all(...playerIds) as { player_id: number }[];
+  for (const row of rows) out.add(row.player_id);
+  return out;
+}
+
+export function replacePlayerTransfers(
+  playerId: number,
+  transfers: Array<{
+    transferDate: string;
+    type: string | null;
+    teamInId: number | null;
+    teamInName: string | null;
+    teamInLogo: string | null;
+    teamOutId: number | null;
+    teamOutName: string | null;
+    teamOutLogo: string | null;
+  }>
+): void {
+  const insert = db.prepare(
+    `INSERT INTO player_transfers (
+       player_id, transfer_date, type,
+       team_in_id, team_in_name, team_in_logo,
+       team_out_id, team_out_name, team_out_logo, fetched_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+  );
+  const markFetched = db.prepare(
+    `INSERT INTO player_transfer_fetches (player_id, fetched_at)
+     VALUES (?, datetime('now'))
+     ON CONFLICT(player_id) DO UPDATE SET fetched_at = excluded.fetched_at`
+  );
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM player_transfers WHERE player_id = ?").run(playerId);
+    for (const t of transfers) {
+      insert.run(
+        playerId, t.transferDate, t.type,
+        t.teamInId, t.teamInName, t.teamInLogo,
+        t.teamOutId, t.teamOutName, t.teamOutLogo
+      );
+    }
+    markFetched.run(playerId);
+  });
+  tx();
 }

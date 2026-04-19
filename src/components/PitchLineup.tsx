@@ -19,6 +19,10 @@ export interface PlayerAnnotations {
   subOff: number | null; // minute
   nationality: string | null;
   countryCode: string | null;
+  // For national-team sides, the player's club takes the flag slot.
+  clubName: string | null;
+  clubLogo: string | null;
+  clubId: number | null;
 }
 
 interface PitchLineupProps {
@@ -98,7 +102,7 @@ function CardBadge({ yellow, red }: { yellow: number | null; red: number | null 
     return (
       <span
         title={`Red card ${red}'`}
-        className="absolute -top-1 -right-1 w-2.5 h-3 bg-red-500 rounded-[1px] ring-1 ring-card shadow"
+        className="absolute -top-1 -right-1 w-3 h-4 bg-red-500 rounded-[2px] border border-white shadow-md"
       />
     );
   }
@@ -106,7 +110,7 @@ function CardBadge({ yellow, red }: { yellow: number | null; red: number | null 
     return (
       <span
         title={`Yellow card ${yellow}'`}
-        className="absolute -top-1 -right-1 w-2.5 h-3 bg-yellow-400 rounded-[1px] ring-1 ring-card shadow"
+        className="absolute -top-1 -right-1 w-3 h-4 bg-yellow-400 rounded-[2px] border border-white shadow-md"
       />
     );
   }
@@ -117,48 +121,80 @@ function SubOffBadge({ minute }: { minute: number }) {
   return (
     <span
       title={`Subbed off ${minute}'`}
-      className="absolute -top-1 -left-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center ring-1 ring-card leading-none"
+      className="absolute -top-1 -left-1 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center ring-1 ring-card leading-none shadow-md"
     >
       ↓
     </span>
   );
 }
 
+function BallIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={`w-3 h-3 ${className}`} aria-hidden="true">
+      <circle cx="8" cy="8" r="7" fill="#ffffff" stroke="#111" strokeWidth="0.8" />
+      <polygon
+        points="8,4.2 10.8,6.2 9.7,9.5 6.3,9.5 5.2,6.2"
+        fill="#111"
+      />
+      <path
+        d="M8 1.2 L8 4.2 M14.8 8 L10.8 6.2 M1.2 8 L5.2 6.2 M4.2 14 L6.3 9.5 M11.8 14 L9.7 9.5"
+        stroke="#111"
+        strokeWidth="0.8"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+function BootIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={`w-3 h-3 ${className}`} aria-hidden="true">
+      <path
+        d="M2 9 L2 11.5 Q2 12.5 3 12.5 L13 12.5 Q14 12.5 14 11.5 L14 10.2 Q14 9.2 13 9 L9.5 8.5 Q8.5 8.3 8.2 7.5 L7 4.5 Q6.7 3.7 5.7 3.7 L4.3 3.7 Q3.3 3.7 3.3 4.7 L3.3 8.2 Q3.3 8.8 2.8 8.9 Z"
+        fill="currentColor"
+      />
+      <circle cx="3.8" cy="13.2" r="0.6" fill="currentColor" />
+      <circle cx="6.5" cy="13.2" r="0.6" fill="currentColor" />
+      <circle cx="9.5" cy="13.2" r="0.6" fill="currentColor" />
+      <circle cx="12.2" cy="13.2" r="0.6" fill="currentColor" />
+    </svg>
+  );
+}
+
 function EventIcons({
   goals,
   assists,
-  yellow,
-  red,
   subOff,
 }: {
   goals: number[];
   assists: number[];
-  yellow: number | null;
-  red: number | null;
   subOff: number | null;
 }) {
-  const hasAny =
-    goals.length > 0 ||
-    assists.length > 0 ||
-    yellow != null ||
-    red != null ||
-    subOff != null;
+  const hasAny = goals.length > 0 || assists.length > 0 || subOff != null;
   if (!hasAny) return null;
 
   return (
-    <div className="flex items-center justify-center gap-0.5 flex-wrap max-w-[70px]">
+    <div className="flex items-center justify-center gap-1 flex-wrap max-w-[80px]">
       {goals.length > 0 && (
-        <span className="text-[9px] text-white" title={`Goals: ${goals.join("', ")}'`}>
-          ⚽{goals.length > 1 ? `×${goals.length}` : ""}
+        <span
+          className="inline-flex items-center gap-0.5 text-[10px] text-white font-semibold tabular-nums"
+          title={`Goals: ${goals.map((m) => m + "'").join(", ")}`}
+        >
+          <BallIcon />
+          {goals.length > 1 ? `×${goals.length}` : ""}
         </span>
       )}
       {assists.length > 0 && (
-        <span className="text-[9px] text-accent" title={`Assists: ${assists.join("', ")}'`}>
-          🅰{assists.length > 1 ? `×${assists.length}` : ""}
+        <span
+          className="inline-flex items-center gap-0.5 text-[10px] text-accent font-semibold tabular-nums"
+          title={`Assists: ${assists.map((m) => m + "'").join(", ")}`}
+        >
+          <BootIcon />
+          {assists.length > 1 ? `×${assists.length}` : ""}
         </span>
       )}
       {subOff != null && (
-        <span className="text-[9px] text-red-400 tabular-nums" title={`Off ${subOff}'`}>
+        <span className="text-[10px] text-red-400 tabular-nums font-semibold" title={`Off ${subOff}'`}>
           ↓{subOff}&apos;
         </span>
       )}
@@ -186,26 +222,29 @@ function PlayerDot({
 
   const dot = (
     <div className="flex flex-col items-center gap-0.5 group">
-      <div
-        className={`relative w-10 h-10 md:w-11 md:h-11 rounded-full bg-surface ring-2 ${accentRing} overflow-hidden flex items-center justify-center group-hover:ring-accent transition-all ${
-          dimmed ? "opacity-60" : ""
-        }`}
-      >
-        {photo && !imgFailed ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={photo}
-            alt={player.name}
-            className="w-full h-full object-cover"
-            onError={() => setImgFailed(true)}
-          />
-        ) : (
-          <span className="text-[10px] font-bold text-muted">
-            {initials(player.name)}
-          </span>
-        )}
+      {/* Outer wrapper: badges live here so they're NOT clipped by the photo circle. */}
+      <div className="relative w-11 h-11 md:w-12 md:h-12">
+        <div
+          className={`w-full h-full rounded-full bg-surface ring-2 ${accentRing} overflow-hidden flex items-center justify-center group-hover:ring-accent transition-all ${
+            dimmed ? "opacity-60" : ""
+          }`}
+        >
+          {photo && !imgFailed ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={photo}
+              alt={player.name}
+              className="w-full h-full object-cover"
+              onError={() => setImgFailed(true)}
+            />
+          ) : (
+            <span className="text-[10px] font-bold text-muted">
+              {initials(player.name)}
+            </span>
+          )}
+        </div>
         {player.shirtNumber != null && (
-          <span className="absolute -bottom-0.5 -right-0.5 bg-accent text-black text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center ring-1 ring-card">
+          <span className="absolute -bottom-1 -right-1 bg-accent text-black text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center ring-2 ring-card leading-none shadow-md">
             {player.shirtNumber}
           </span>
         )}
@@ -215,7 +254,15 @@ function PlayerDot({
         )}
       </div>
       <div className="flex items-center justify-center gap-1 max-w-[80px]">
-        {annotations.countryCode && (
+        {annotations.clubLogo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={annotations.clubLogo}
+            alt={annotations.clubName ?? ""}
+            title={annotations.clubName ?? ""}
+            className="w-3 h-3 object-contain shrink-0"
+          />
+        ) : annotations.countryCode ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={`https://flagcdn.com/${annotations.countryCode}.svg`}
@@ -223,7 +270,7 @@ function PlayerDot({
             title={annotations.nationality ?? ""}
             className="w-3 h-2 object-cover rounded-[1px] shrink-0"
           />
-        )}
+        ) : null}
         <span className="text-[10px] md:text-[11px] text-white font-medium leading-tight truncate">
           {player.name.split(" ").slice(-1)[0]}
         </span>
@@ -231,8 +278,6 @@ function PlayerDot({
       <EventIcons
         goals={annotations.goals}
         assists={annotations.assists}
-        yellow={annotations.yellow}
-        red={annotations.red}
         subOff={annotations.subOff}
       />
     </div>
@@ -285,7 +330,11 @@ function TeamHalf({
             : 95 - rowFrac * 90;
 
         return rowPlayers.map((p, i) => {
-          const topPct = ((i + 1) / (rowPlayers.length + 1)) * 100;
+          // Away team is rendered on the right half attacking left, so the team's own col 1 — which
+          // API-Football numbers from the team's attacking-left perspective — needs to land at the
+          // BOTTOM of the screen rather than the top. Mirror the index for that side only.
+          const topIdx = side === "away" ? rowPlayers.length - 1 - i : i;
+          const topPct = ((topIdx + 1) / (rowPlayers.length + 1)) * 100;
           return (
             <div
               key={`${row}-${i}-${p.name}`}

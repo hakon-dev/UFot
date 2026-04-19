@@ -15,6 +15,12 @@ function totalMinutes(intervals: number[][]): number {
   return intervals.reduce((sum, [s, e]) => sum + (e - s), 0);
 }
 
+function isValid(intervals: number[][]): boolean {
+  return intervals.every(
+    ([s, e]) => Number.isFinite(s) && Number.isFinite(e) && s >= 0 && e <= 120 && s < e
+  );
+}
+
 export default function WatchIntervalEditor({ intervals, onChange, matchId }: WatchIntervalEditorProps) {
   const [saving, setSaving] = useState(false);
   const isFullMatch = intervals.length === 1 && intervals[0][0] === 0 && intervals[0][1] === 90;
@@ -22,7 +28,7 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
 
   function setIntervals(next: number[][]) {
     onChange(next);
-    if (matchId) {
+    if (matchId && isValid(next)) {
       setSaving(true);
       fetch(`/api/matches/${matchId}/intervals`, {
         method: "PUT",
@@ -61,11 +67,8 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
       updated[field] = value;
       return updated;
     });
-    // Only save if valid
-    const iv = next[index];
-    if (iv[0] >= 0 && iv[1] <= 120 && iv[0] < iv[1]) {
-      setIntervals(next);
-    }
+    // Always propagate so the user's typing isn't snapped back; server save is gated by isValid().
+    setIntervals(next);
   }
 
   return (
@@ -116,54 +119,62 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
         )}
       </div>
 
-      {/* Interval rows */}
-      {!isFullMatch && (
-        <div className="space-y-2">
-          {intervals.map(([s, e], i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                max={119}
-                value={s}
-                onChange={(ev) => updateInterval(i, 0, parseInt(ev.target.value) || 0)}
-                className="w-16 bg-surface border border-card-border rounded px-2 py-1 text-sm text-white text-center focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-              <span className="text-muted text-xs">to</span>
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={e}
-                onChange={(ev) => updateInterval(i, 1, parseInt(ev.target.value) || 1)}
-                className="w-16 bg-surface border border-card-border rounded px-2 py-1 text-sm text-white text-center focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-              <span className="text-xs text-muted">{e - s} min</span>
-              {intervals.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => removeInterval(i)}
-                  className="text-muted/50 hover:text-red-400 transition-colors ml-1"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={addInterval}
-            className="text-xs text-muted hover:text-accent transition-colors flex items-center gap-1"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-            </svg>
-            Add interval
-          </button>
-        </div>
-      )}
+      {/* Interval rows — always visible so users know they can type minutes by keyboard. */}
+      <div className="space-y-2">
+        <p className="text-[11px] text-muted">
+          Type the minutes you watched, or click <span className="text-slate-300">Add interval</span> for a second segment.
+        </p>
+        {intervals.map(([s, e], i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={119}
+              value={Number.isFinite(s) ? s : ""}
+              onChange={(ev) => {
+                const v = ev.target.value;
+                updateInterval(i, 0, v === "" ? 0 : parseInt(v, 10));
+              }}
+              className="w-16 bg-surface border border-card-border rounded px-2 py-1 text-sm text-white text-center focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <span className="text-muted text-xs">to</span>
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={Number.isFinite(e) ? e : ""}
+              onChange={(ev) => {
+                const v = ev.target.value;
+                updateInterval(i, 1, v === "" ? 0 : parseInt(v, 10));
+              }}
+              className="w-16 bg-surface border border-card-border rounded px-2 py-1 text-sm text-white text-center focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <span className="text-xs text-muted tabular-nums">{Math.max(0, e - s)} min</span>
+            {intervals.length > 1 && (
+              <button
+                type="button"
+                onClick={() => removeInterval(i)}
+                className="text-muted/50 hover:text-red-400 transition-colors ml-1"
+                aria-label="Remove interval"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addInterval}
+          className="text-xs px-3 py-1.5 rounded-full border border-card-border text-slate-300 hover:text-accent hover:border-accent/40 transition-colors inline-flex items-center gap-1.5"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+          </svg>
+          Add interval
+        </button>
+      </div>
     </div>
   );
 }

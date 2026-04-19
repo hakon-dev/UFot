@@ -106,6 +106,7 @@ export interface TeamCountryRecord {
   teamId: number | null;
   country: string | null;
   countryCode: string | null;
+  national?: boolean | null;
 }
 
 export async function enrichTeamRecordsWithCountry<T extends TeamCountryRecord>(
@@ -123,6 +124,7 @@ export async function enrichTeamRecordsWithCountry<T extends TeamCountryRecord>(
     if (rec) {
       r.country = rec.country;
       r.countryCode = rec.country_code;
+      r.national = rec.national == null ? null : rec.national === 1;
     }
   }
 
@@ -143,9 +145,11 @@ export async function enrichTeamRecordsWithCountry<T extends TeamCountryRecord>(
           country: profile.country,
           countryCode: code,
           logo: profile.logo,
+          national: profile.national,
         });
         r.country = profile.country;
         r.countryCode = code;
+        r.national = profile.national;
       } catch {
         // Best-effort; country column falls back to "-" if the fetch fails.
       }
