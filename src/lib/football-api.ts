@@ -399,15 +399,28 @@ function looksAbbreviated(name: string): boolean {
   return /^[A-Z]\.(?:[-.]?[A-Z]\.)*\s/.test(name.trim());
 }
 
+interface ApiFootballSeasonTeam {
+  id: number;
+  name: string;
+  logo: string | null;
+}
+
 interface ApiFootballPlayerSeasonRow {
   player: { id: number; name: string };
-  statistics?: Array<{ league?: { season?: number } }>;
+  statistics?: Array<{ team?: ApiFootballSeasonTeam; league?: { season?: number } }>;
 }
 
 // Walks back from the current season through the prior one until we find a response. Different
 // seasons are stored separately in the API — trying only the current year would miss retired
 // or recently-transferred players. Capped at 2 seasons to bound the worst-case API cost.
 async function fetchPlayerNameFromSeason(playerId: number): Promise<string | null> {
+  const row = await fetchPlayerSeasonRow(playerId);
+  return row?.player?.name ?? null;
+}
+
+async function fetchPlayerSeasonRow(
+  playerId: number
+): Promise<ApiFootballPlayerSeasonRow | null> {
   const currentYear = new Date().getFullYear();
   const candidateSeasons = [currentYear, currentYear - 1];
   for (const season of candidateSeasons) {
@@ -415,10 +428,52 @@ async function fetchPlayerNameFromSeason(playerId: number): Promise<string | nul
     if (!res.ok) continue;
     const data: ApiFootballResponse<ApiFootballPlayerSeasonRow> = await res.json();
     const row = data.response?.[0];
-    const name = row?.player?.name;
-    if (name) return name;
+    if (row) return row;
   }
   return null;
+}
+
+// Second-chance club lookup when /transfers has no data. Returns every unique team the player
+// appears under across the last few seasons, newest → oldest. We return the full list rather
+// than picking here because the caller has the `teams` cache (and therefore the national-team
+// flag) — e.g. for Ingrid Engen in season 2025 the API returns [Norway W ×4, Lyon W ×2], and
+// the caller needs to skip the national rows to land on Lyon W. Bounded at 3 seasons.
+export async function fetchPlayerCurrentTeam(
+  playerId: number
+): Promise<Array<{ id: number; name: string; logo: string | null }>> {
+  const currentYear = new Date().getFullYear();
+  const candidateSeasons = [currentYear, currentYear - 1, currentYear - 2];
+  const seen = new Set<number>();
+  const out: Array<{ id: number; name: string; logo: string | null }> = [];
+  for (const season of candidateSeasons) {
+    const res = await fetchApi(`/players?id=${playerId}&season=${season}`);
+    // API-Football signals rate-limiting in two ways: HTTP 429, and HTTP 200 with a `rateLimit`
+    // key in `errors`. Both must throw — a silent skip would poison the cache (the caller
+    // persists "no team for this player" when the list comes back empty).
+    if (res.status === 429) {
+      throw new Error(`api-football rate-limited: /players?id=${playerId}&season=${season}`);
+    }
+    if (!res.ok) continue;
+    const data: ApiFootballResponse<ApiFootballPlayerSeasonRow> = await res.json();
+    if (isRateLimited(data.errors)) {
+      throw new Error(`api-football rate-limited: /players?id=${playerId}&season=${season}`);
+    }
+    const row = data.response?.[0];
+    if (!row?.statistics?.length) continue;
+    for (const stat of row.statistics) {
+      const t = stat.team;
+      if (t?.id && t?.name && !seen.has(t.id)) {
+        seen.add(t.id);
+        out.push({ id: t.id, name: t.name, logo: t.logo ?? null });
+      }
+    }
+  }
+  return out;
+}
+
+function isRateLimited(errors: unknown): boolean {
+  if (!errors || typeof errors !== "object") return false;
+  return "rateLimit" in (errors as Record<string, unknown>);
 }
 
 // Keep the commonly-used name ("Pedri", "Rodri", "Vinicius Junior") when it's already spelled
@@ -486,6 +541,12 @@ export async function fetchPlayerTransfers(
     throw new Error(`api-football error: transfers ${res.status}`);
   }
   const data: ApiFootballResponse<ApiFootballTransfers> = await res.json();
+  // API-Football returns HTTP 200 with `errors.rateLimit` set when you're over the per-minute
+  // cap. Without this check we'd silently persist an empty transfer history and mark the player
+  // as "fetched", meaning we never retry — the club column then stays blank forever.
+  if (isRateLimited(data.errors)) {
+    throw new Error(`api-football rate-limited: /transfers?player=${playerId}`);
+  }
   const row = data.response?.[0];
   if (!row) return [];
   return row.transfers.map((t) => ({

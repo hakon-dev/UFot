@@ -178,6 +178,20 @@ if (!playerColumns.includes("position")) {
 if (!playerColumns.includes("shirt_number")) {
   db.exec("ALTER TABLE players ADD COLUMN shirt_number INTEGER");
 }
+// Second-chance club lookup: for players whose /transfers response is empty, /players?id=X&season=Y
+// returns their current team in statistics[].team. Cached here so we don't re-fetch each visit.
+if (!playerColumns.includes("current_team_id")) {
+  db.exec("ALTER TABLE players ADD COLUMN current_team_id INTEGER");
+}
+if (!playerColumns.includes("current_team_name")) {
+  db.exec("ALTER TABLE players ADD COLUMN current_team_name TEXT");
+}
+if (!playerColumns.includes("current_team_logo")) {
+  db.exec("ALTER TABLE players ADD COLUMN current_team_logo TEXT");
+}
+if (!playerColumns.includes("current_team_fetched_at")) {
+  db.exec("ALTER TABLE players ADD COLUMN current_team_fetched_at TEXT");
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS teams (
@@ -632,6 +646,10 @@ export interface PlayerRecord {
   photo: string | null;
   position: string | null;
   shirt_number: number | null;
+  current_team_id: number | null;
+  current_team_name: string | null;
+  current_team_logo: string | null;
+  current_team_fetched_at: string | null;
   fetched_at: string;
 }
 
@@ -674,6 +692,22 @@ export function upsertPlayer(record: {
     record.id, record.name, record.nationality, record.countryCode, record.photo,
     record.position, record.shirtNumber
   );
+}
+
+// Writes the season-endpoint team fallback. Always stamps current_team_fetched_at so we can
+// distinguish "never tried" (NULL) from "tried, API had no team" (stamped, team_id NULL) — the
+// same pattern we use for player_transfer_fetches. Requires the player row to exist; callers
+// upsert via upsertPlayer first when needed.
+export function upsertPlayerCurrentTeam(
+  playerId: number,
+  team: { id: number; name: string; logo: string | null } | null
+): void {
+  db.prepare(
+    `UPDATE players
+     SET current_team_id = ?, current_team_name = ?, current_team_logo = ?,
+         current_team_fetched_at = datetime('now')
+     WHERE id = ?`
+  ).run(team?.id ?? null, team?.name ?? null, team?.logo ?? null, playerId);
 }
 
 export interface TeamRecord {

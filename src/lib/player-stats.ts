@@ -1,11 +1,11 @@
 import type { Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard, PlayerTransferRecord } from "./db";
 import {
-  getMatchesWithDetails, getPlayers, getAllCachedPlayers, upsertPlayer,
+  getMatchesWithDetails, getPlayers, getAllCachedPlayers, upsertPlayer, upsertPlayerCurrentTeam,
   getPlayerTransfers, replacePlayerTransfers, hasFetchedPlayerTransfers,
   nationalTeamIds, getTeams, upsertTeam, fetchedPlayerTransferIds,
 } from "./db";
 import { countryNameToCode } from "./country-codes";
-import { fetchPlayerProfile, fetchPlayerTransfers, fetchTeamProfile } from "./football-api";
+import { fetchPlayerProfile, fetchPlayerTransfers, fetchPlayerCurrentTeam, fetchTeamProfile } from "./football-api";
 
 export interface PlayerStat {
   playerId: number | null;
@@ -495,10 +495,15 @@ async function ensureTeamsClassified(
 // once per player, bounded by budget.
 export async function enrichPlayerStatsWithClub(
   stats: PlayerStat[],
-  options: { maxTeamFetches?: number; maxTransferFetches?: number } = {}
+  options: {
+    maxTeamFetches?: number;
+    maxTransferFetches?: number;
+    maxSeasonFetches?: number;
+  } = {}
 ): Promise<void> {
   const maxTeamFetches = options.maxTeamFetches ?? 10;
   const maxTransferFetches = options.maxTransferFetches ?? 15;
+  const maxSeasonFetches = options.maxSeasonFetches ?? 8;
 
   const currentClubIds = stats
     .map((s) => s.clubId)
@@ -583,6 +588,94 @@ export async function enrichPlayerStatsWithClub(
       s.club = club.team_in_name;
       s.clubId = club.team_in_id;
       s.clubCrest = club.team_in_logo;
+    }
+  }
+
+  // Third-chance fallback. For players whose /transfers history is genuinely empty on API-Football
+  // (Weghorst, Leo Østigård, Caroline Graham Hansen, Rafael Leão, etc — the transfers endpoint
+  // sometimes has no coverage), read from the cached /players?id=X&season=Y team. On cache miss,
+  // fetch once and persist.
+  const stillNoClub = stats.filter((s) => s.playerId != null && s.clubId == null);
+  if (stillNoClub.length === 0) return;
+
+  const stillNoClubIds = stillNoClub.map((s) => s.playerId as number);
+  const cachedPlayers = getPlayers(stillNoClubIds);
+
+  // Fill from cache first — no API calls needed when we've already stamped current_team_fetched_at.
+  const cachedTeamIds = new Set<number>();
+  for (const s of stillNoClub) {
+    const rec = cachedPlayers.get(s.playerId as number);
+    if (rec?.current_team_id != null) cachedTeamIds.add(rec.current_team_id);
+  }
+  if (cachedTeamIds.size > 0) await ensureTeamsClassified([...cachedTeamIds], maxTeamFetches);
+  const cachedNational =
+    cachedTeamIds.size > 0 ? nationalTeamIds([...cachedTeamIds]) : new Set<number>();
+  for (const s of stillNoClub) {
+    const rec = cachedPlayers.get(s.playerId as number);
+    if (rec?.current_team_id != null && rec.current_team_name &&
+        !cachedNational.has(rec.current_team_id)) {
+      s.club = rec.current_team_name;
+      s.clubId = rec.current_team_id;
+      s.clubCrest = rec.current_team_logo;
+    }
+  }
+
+  // Fetch for players we've never tried the season endpoint on. Skip those whose transfers
+  // haven't been fetched yet — let the transfers pass take the first swing on them next time;
+  // this fallback is for players where we already know /transfers had nothing useful.
+  const toFetchSeason = stillNoClub
+    .filter((s) => {
+      if (s.clubId != null) return false; // just got filled from cache
+      const rec = cachedPlayers.get(s.playerId as number);
+      if (rec?.current_team_fetched_at != null) return false; // already tried
+      return hasFetchedPlayerTransfers(s.playerId as number);
+    })
+    .slice(0, maxSeasonFetches);
+
+  if (toFetchSeason.length === 0) return;
+
+  type FetchOutcome =
+    | { stat: PlayerStat; ok: true; teams: Array<{ id: number; name: string; logo: string | null }> }
+    | { stat: PlayerStat; ok: false };
+
+  const fetched: FetchOutcome[] = await Promise.all(
+    toFetchSeason.map(async (s): Promise<FetchOutcome> => {
+      const pid = s.playerId as number;
+      try {
+        const teams = await fetchPlayerCurrentTeam(pid);
+        // Ensure a players row exists before upsertPlayerCurrentTeam can UPDATE it. Most of
+        // these rows already exist (nationality was cached earlier), but guard the edge case.
+        if (!cachedPlayers.has(pid)) {
+          upsertPlayer({
+            id: pid, name: s.name, nationality: s.nationality, countryCode: s.countryCode,
+            photo: null, position: null, shirtNumber: null,
+          });
+        }
+        return { stat: s, ok: true, teams };
+      } catch {
+        // Rate-limited or network error. Do NOT persist — leaving current_team_fetched_at
+        // untouched means the next stats-page load will retry.
+        return { stat: s, ok: false };
+      }
+    })
+  );
+
+  const freshTeamIds = new Set<number>();
+  for (const f of fetched) if (f.ok) for (const t of f.teams) freshTeamIds.add(t.id);
+  if (freshTeamIds.size > 0) await ensureTeamsClassified([...freshTeamIds], maxTeamFetches);
+  const freshNational =
+    freshTeamIds.size > 0 ? nationalTeamIds([...freshTeamIds]) : new Set<number>();
+  for (const f of fetched) {
+    if (!f.ok) continue;
+    const pid = f.stat.playerId as number;
+    const club = f.teams.find((t) => !freshNational.has(t.id)) ?? null;
+    // Persist the chosen club (or null if all candidates were national) so the cache mirrors
+    // what we just rendered. Future reads skip the season endpoint entirely.
+    upsertPlayerCurrentTeam(pid, club);
+    if (club) {
+      f.stat.club = club.name;
+      f.stat.clubId = club.id;
+      f.stat.clubCrest = club.logo;
     }
   }
 }
@@ -802,6 +895,44 @@ export async function getPlayerHeader(
       !transferNationalIds.has(t.teamIn.id)
   );
 
+  // Season-endpoint fallback for players whose /transfers was empty. Try the cache first; if
+  // never fetched and transfers have been tried (meaning transfers came back empty), fetch once.
+  let clubId: number | null = mostRecentClub?.teamIn.id ?? null;
+  let clubName: string | null = mostRecentClub?.teamIn.name ?? null;
+  let clubCrest: string | null = mostRecentClub?.teamIn.logo ?? null;
+
+  if (clubId == null) {
+    let seasonTeam: { id: number; name: string; logo: string | null } | null = null;
+    if (cache?.current_team_id != null && cache.current_team_name) {
+      seasonTeam = {
+        id: cache.current_team_id,
+        name: cache.current_team_name,
+        logo: cache.current_team_logo,
+      };
+    } else if (cache?.current_team_fetched_at == null && hasFetchedPlayerTransfers(playerId)) {
+      try {
+        const candidates = await fetchPlayerCurrentTeam(playerId);
+        const candidateIds = candidates.map((c) => c.id);
+        const nats = candidateIds.length > 0 ? nationalTeamIds(candidateIds) : new Set<number>();
+        seasonTeam = candidates.find((c) => !nats.has(c.id)) ?? null;
+        // Only persist on successful fetch. A throw (rate limit / network) leaves
+        // current_team_fetched_at null so the next page load retries.
+        upsertPlayerCurrentTeam(playerId, seasonTeam);
+      } catch {
+        // Rate-limited or network error — don't poison the cache.
+      }
+    }
+    if (seasonTeam) {
+      // Cache-sourced seasonTeam may predate the team being flagged national; re-verify.
+      const isNational = nationalTeamIds([seasonTeam.id]).has(seasonTeam.id);
+      if (!isNational) {
+        clubId = seasonTeam.id;
+        clubName = seasonTeam.name;
+        clubCrest = seasonTeam.logo;
+      }
+    }
+  }
+
   // Prefer the cache name (from /players/profiles) over the lineup-derived profile name; the
   // cache holds the full canonical name while lineups sometimes carry an abbreviated form.
   const name = cache?.name ?? profile?.name ?? `Player ${playerId}`;
@@ -816,9 +947,9 @@ export async function getPlayerHeader(
     countryCode: cache?.country_code ?? null,
     position: cache?.position ?? profile?.latestPosition ?? null,
     shirtNumber: cache?.shirt_number ?? profile?.latestShirt ?? null,
-    clubId: mostRecentClub?.teamIn.id ?? null,
-    clubName: mostRecentClub?.teamIn.name ?? null,
-    clubCrest: mostRecentClub?.teamIn.logo ?? null,
+    clubId,
+    clubName,
+    clubCrest,
   };
 }
 
