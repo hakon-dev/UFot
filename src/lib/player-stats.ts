@@ -1,7 +1,8 @@
 import type { Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard, PlayerTransferRecord } from "./db";
 import {
-  getMatchesWithDetails, getPlayers, upsertPlayer,
+  getMatchesWithDetails, getPlayers, getAllCachedPlayers, upsertPlayer,
   getPlayerTransfers, replacePlayerTransfers, hasFetchedPlayerTransfers,
+  nationalTeamIds,
 } from "./db";
 import { countryNameToCode } from "./country-codes";
 import { fetchPlayerProfile, fetchPlayerTransfers } from "./football-api";
@@ -120,6 +121,17 @@ export function computePlayerStats(
 
   const globalNameToId = buildGlobalNameToId(matches);
 
+  // Pre-compute which team IDs in this match set are national teams. A national team is never
+  // a player's "club" — they're a country they represent, not an employer. If a player only
+  // has national-team appearances (e.g. a watched international with no club-match coverage),
+  // their club stays null and the Club column renders blank rather than "Norway".
+  const referencedTeamIds = new Set<number>();
+  for (const m of matches) {
+    if (m.home_team_id != null) referencedTeamIds.add(m.home_team_id);
+    if (m.away_team_id != null) referencedTeamIds.add(m.away_team_id);
+  }
+  const nationalIds = nationalTeamIds([...referencedTeamIds]);
+
   function ensure(playerId: number | null, name: string): PlayerStat {
     // Resolve name-only calls to their canonical id when we've seen one anywhere.
     const resolvedId = playerId ?? globalNameToId.get(name) ?? null;
@@ -158,6 +170,9 @@ export function computePlayerStats(
     clubId: number | null,
     clubCrest: string | null
   ): void {
+    // National teams are never a club. Skip without touching latestClubDate so a subsequent
+    // club match (even older) can still set the club.
+    if (clubId != null && nationalIds.has(clubId)) return;
     const resolvedId = playerId ?? globalNameToId.get(name) ?? null;
     const key = playerKey(resolvedId, name);
     const prev = latestClubDate.get(key);
@@ -253,7 +268,83 @@ export function computePlayerStats(
     }
   }
 
+  // Prefer the canonical full name from the /players/profiles cache over the lineup-derived
+  // one. API-Football lineups sometimes return "L. Messi" while the profile returns
+  // "Lionel Messi"; the stats table should always show the full form.
+  const resolvedIds = [...stats.values()]
+    .map((s) => s.playerId)
+    .filter((id): id is number => id != null);
+  const cachedById = resolvedIds.length > 0 ? getPlayers(resolvedIds) : new Map();
+  for (const s of stats.values()) {
+    if (s.playerId == null) continue;
+    const rec = cachedById.get(s.playerId);
+    if (rec?.name && rec.name.length > s.name.length) s.name = rec.name;
+  }
+
+  // For stats still keyed by name (no id resolved), try to upgrade the abbreviated form against
+  // the players cache. Match conservatively: initial-of-first-name + last-name must agree
+  // (e.g. "L. Messi" vs "Lionel Messi"). Collects every cached player once so this costs a
+  // single pass, and re-keys the stat to `id:{resolvedId}` when a unique match is found.
+  const orphans = [...stats.values()].filter((s) => s.playerId == null);
+  if (orphans.length > 0) {
+    const allCached = getAllCachedPlayers();
+    const byLastName = new Map<string, { id: number; name: string }[]>();
+    for (const rec of allCached) {
+      if (!rec.name) continue;
+      const parts = rec.name.trim().split(/\s+/);
+      if (parts.length < 2) continue;
+      const last = parts[parts.length - 1].toLowerCase();
+      const arr = byLastName.get(last) ?? [];
+      arr.push({ id: rec.id, name: rec.name });
+      byLastName.set(last, arr);
+    }
+
+    for (const s of orphans) {
+      const resolved = tryResolveAbbreviatedName(s.name, byLastName);
+      if (!resolved) continue;
+
+      const oldKey = `name:${s.name}`;
+      const newKey = `id:${resolved.id}`;
+      const existing = stats.get(newKey);
+      if (existing) {
+        // Merge into the existing id-keyed row.
+        existing.minutesWatched += s.minutesWatched;
+        existing.matches += s.matches;
+        existing.goalsWatched += s.goalsWatched;
+        existing.assistsWatched += s.assistsWatched;
+        existing.yellowsWatched += s.yellowsWatched;
+        existing.redsWatched += s.redsWatched;
+        if (resolved.name.length > existing.name.length) existing.name = resolved.name;
+        stats.delete(oldKey);
+      } else {
+        s.playerId = resolved.id;
+        if (resolved.name.length > s.name.length) s.name = resolved.name;
+        stats.delete(oldKey);
+        stats.set(newKey, s);
+      }
+    }
+  }
+
   return [...stats.values()].sort((a, b) => b.minutesWatched - a.minutesWatched);
+}
+
+function tryResolveAbbreviatedName(
+  abbr: string,
+  byLastName: Map<string, { id: number; name: string }[]>
+): { id: number; name: string } | null {
+  const parts = abbr.trim().split(/\s+/);
+  if (parts.length < 2) return null;
+  const last = parts[parts.length - 1].toLowerCase();
+  const firstInitial = parts[0].replace(/\./g, "").charAt(0).toLowerCase();
+  if (!firstInitial) return null;
+
+  const candidates = byLastName.get(last);
+  if (!candidates || candidates.length === 0) return null;
+
+  const matches = candidates.filter((c) => c.name.trim().charAt(0).toLowerCase() === firstInitial);
+  // Require unambiguous match — if two cached players share initial + last name, skip.
+  if (matches.length !== 1) return null;
+  return matches[0];
 }
 
 export interface PlayerNationality {
@@ -319,10 +410,14 @@ export async function enrichPlayerStatsWithNationality(
     if (rec) {
       s.nationality = rec.nationality;
       s.countryCode = rec.country_code;
+      if (rec.name && rec.name.length > s.name.length) s.name = rec.name;
     }
   }
 
-  // Fetch missing ones, bounded by maxFetches to respect the 100/day API budget.
+  // Fetch missing ones, bounded by maxFetches to respect the 100/day API budget. We don't
+  // retry cached-but-still-abbreviated entries: `fetchPlayerProfile` already runs its full
+  // resolution pipeline (profiles → expand → season fallback), so a cached abbreviation is
+  // the best we can get and retrying would only burn API budget.
   const toFetch = stats
     .filter((s) => s.playerId != null && !cached.has(s.playerId))
     .slice(0, maxFetches);
@@ -345,6 +440,7 @@ export async function enrichPlayerStatsWithNationality(
         });
         s.nationality = profile.nationality;
         s.countryCode = code;
+        if (profile.name && profile.name.length > s.name.length) s.name = profile.name;
       } catch {
         // Swallow — nationality is best-effort; table still renders without it.
       }
@@ -357,16 +453,20 @@ export interface PlayerMatchAppearance {
   date: string;
   homeTeam: string;
   awayTeam: string;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
   homeScore: number;
   awayScore: number;
   homeCrest: string | null;
   awayCrest: string | null;
   team: "home" | "away";
+  teamId: number | null;
   minutesWatched: number;
   goalsWatched: number;
   assistsWatched: number;
   yellowsWatched: number;
   redsWatched: number;
+  watchedInPerson: boolean;
 }
 
 export interface PlayerProfile {
@@ -417,10 +517,14 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
     if (!lineup) continue;
 
     if (!latestName || match.date > latestDate) {
-      latestName = lineup.player_name;
       latestDate = match.date;
       latestPosition = lineup.position;
       latestShirt = lineup.shirt_number;
+    }
+    // Prefer the longest seen name across all lineups — one match may say "L. Messi" while
+    // another says "Lionel Messi". The header should show the full form.
+    if (!latestName || lineup.player_name.length > latestName.length) {
+      latestName = lineup.player_name;
     }
 
     const subbedOut = buildSubMap(match.substitutions, "out");
@@ -463,16 +567,20 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
       date: match.date,
       homeTeam: match.home_team,
       awayTeam: match.away_team,
+      homeTeamId: match.home_team_id,
+      awayTeamId: match.away_team_id,
       homeScore: match.home_score,
       awayScore: match.away_score,
       homeCrest: match.home_crest,
       awayCrest: match.away_crest,
       team: lineup.team as "home" | "away",
+      teamId: lineup.team === "home" ? match.home_team_id : match.away_team_id,
       minutesWatched,
       goalsWatched,
       assistsWatched,
       yellowsWatched,
       redsWatched,
+      watchedInPerson: match.watched_in_person === 1,
     });
   }
 
@@ -540,11 +648,24 @@ export async function getPlayerHeader(
   }
 
   const transfers = await getPlayerTransferHistory(playerId);
+
+  // Walk transfers newest-first and pick the first transfer whose destination is a real club —
+  // not a national team. Fall back to null (rendered as no club chip) if the player only has
+  // national-team transfers, which happens for players whose API transfer history is sparse.
+  const transferTeamIds = transfers
+    .map((t) => t.teamIn.id)
+    .filter((id): id is number => id != null);
+  const transferNationalIds = transferTeamIds.length > 0 ? nationalTeamIds(transferTeamIds) : new Set<number>();
   const mostRecentClub = transfers.find(
-    (t) => t.teamIn.id != null && t.teamIn.name
+    (t) =>
+      t.teamIn.id != null &&
+      t.teamIn.name &&
+      !transferNationalIds.has(t.teamIn.id)
   );
 
-  const name = profile?.name ?? cache?.name ?? `Player ${playerId}`;
+  // Prefer the cache name (from /players/profiles) over the lineup-derived profile name; the
+  // cache holds the full canonical name while lineups sometimes carry an abbreviated form.
+  const name = cache?.name ?? profile?.name ?? `Player ${playerId}`;
   const photoUrl =
     profile?.photoUrl ?? cache?.photo ?? `https://media.api-sports.io/football/players/${playerId}.png`;
 
@@ -576,6 +697,54 @@ function rowToTransfer(r: PlayerTransferRecord): PlayerTransferHistoryEntry {
     teamIn: { id: r.team_in_id, name: r.team_in_name, logo: r.team_in_logo },
     teamOut: { id: r.team_out_id, name: r.team_out_name, logo: r.team_out_logo },
   };
+}
+
+export interface PlayerTenure {
+  clubId: number | null;
+  clubName: string | null;
+  clubLogo: string | null;
+  startDate: string;
+  endDate: string | null;
+  isLoan: boolean;
+  isCurrent: boolean;
+}
+
+// Fold a transfer list into one row per club spell. Consecutive spells at the same club stay as
+// separate rows (per the design: a return from loan is its own tenure). National-team rows are
+// filtered out because they belong on the nationality chip, not in club history.
+export function buildPlayerTenures(
+  transfers: PlayerTransferHistoryEntry[],
+  currentClubId: number | null
+): PlayerTenure[] {
+  if (transfers.length === 0) return [];
+
+  const teamInIds = transfers.map((t) => t.teamIn.id).filter((id): id is number => id != null);
+  const nationalIds = teamInIds.length > 0 ? nationalTeamIds(teamInIds) : new Set<number>();
+
+  const filtered = transfers
+    .filter((t) => t.teamIn.name && (t.teamIn.id == null || !nationalIds.has(t.teamIn.id)))
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  const tenures: PlayerTenure[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const t = filtered[i];
+    const next = filtered[i + 1];
+    const isLast = i === filtered.length - 1;
+    const matchesCurrent = currentClubId != null && t.teamIn.id === currentClubId;
+    tenures.push({
+      clubId: t.teamIn.id,
+      clubName: t.teamIn.name,
+      clubLogo: t.teamIn.logo,
+      startDate: t.date,
+      endDate: next ? next.date : isLast && matchesCurrent ? null : null,
+      isLoan: (t.type ?? "").toLowerCase().includes("loan"),
+      isCurrent: isLast && matchesCurrent,
+    });
+  }
+
+  // Most recent first.
+  return tenures.reverse();
 }
 
 // Read cache first; if we've never fetched this player's transfers, fetch once and persist.

@@ -18,6 +18,8 @@ interface MatchSearchResult {
   round: string;
   date: string;
   venue: string;
+  venueId: number | null;
+  venueCity: string | null;
   homeCrest: string;
   awayCrest: string;
 }

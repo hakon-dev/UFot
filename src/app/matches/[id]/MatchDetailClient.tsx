@@ -73,6 +73,7 @@ interface Props {
   matchId: string;
   canFetchDetails: boolean;
   initialIntervals: number[][];
+  initialWatchedInPerson: boolean;
   homeTeam: string;
   awayTeam: string;
   homeTeamId: number | null;
@@ -140,6 +141,7 @@ export default function MatchDetailClient({
   matchId,
   canFetchDetails,
   initialIntervals,
+  initialWatchedInPerson,
   homeTeam,
   awayTeam,
   homeTeamId,
@@ -149,6 +151,22 @@ export default function MatchDetailClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [intervals, setIntervals] = useState(initialIntervals);
+  const [watchedInPerson, setWatchedInPerson] = useState(initialWatchedInPerson);
+  const [stadiumSaving, setStadiumSaving] = useState(false);
+
+  async function toggleWatchedInPerson(next: boolean) {
+    setWatchedInPerson(next);
+    setStadiumSaving(true);
+    try {
+      await fetch(`/api/matches/${matchId}/stadium`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ watchedInPerson: next }),
+      });
+    } finally {
+      setStadiumSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!canFetchDetails) {
@@ -274,6 +292,16 @@ export default function MatchDetailClient({
           onChange={setIntervals}
           matchId={matchId}
         />
+        <label className="flex items-center gap-2.5 mt-4 text-sm text-slate-200 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={watchedInPerson}
+            onChange={(e) => toggleWatchedInPerson(e.target.checked)}
+            disabled={stadiumSaving}
+            className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+          />
+          Watched in person at the stadium
+        </label>
       </div>
 
       {/* Loading state */}
@@ -316,9 +344,11 @@ export default function MatchDetailClient({
                   <div key={i} className="flex items-center gap-3 text-sm">
                     <span className="text-accent font-bold tabular-nums w-8 text-right">{goal.minute}&apos;</span>
                     <div className="flex-1">
-                      <span className="text-white font-medium">{goal.scorer_name}</span>
+                      <PlayerName id={goal.scorer_id} name={goal.scorer_name} className="text-white font-medium" />
                       {goal.assist_name && (
-                        <span className="text-muted ml-1.5">(assist: {goal.assist_name})</span>
+                        <span className="text-muted ml-1.5">
+                          (assist: <PlayerName id={goal.assist_id} name={goal.assist_name} className="text-muted" inline />)
+                        </span>
                       )}
                       <GoalTypeIcon type={goal.type} />
                     </div>
@@ -385,6 +415,28 @@ export default function MatchDetailClient({
   );
 }
 
+function PlayerName({
+  id,
+  name,
+  className,
+  inline,
+}: {
+  id: number | null;
+  name: string;
+  className?: string;
+  inline?: boolean;
+}) {
+  const Tag = inline ? "span" : "span";
+  if (id != null) {
+    return (
+      <Link href={`/players/${id}`} className={`hover:text-accent transition-colors ${className ?? ""}`}>
+        {name}
+      </Link>
+    );
+  }
+  return <Tag className={className}>{name}</Tag>;
+}
+
 function TeamHeading({ teamName, teamId }: { teamName: string; teamId: number | null }) {
   const header = (
     <h3 className="text-sm font-semibold text-accent mb-3 flex items-center gap-2">
@@ -433,13 +485,13 @@ function SubColumn({
                   <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
                   </svg>
-                  <span className="truncate">{sub.player_in}</span>
+                  <PlayerName id={sub.player_in_id} name={sub.player_in} className="text-green-400 truncate" />
                 </div>
                 <div className="flex items-center gap-1.5 text-red-400">
                   <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clipRule="evenodd" />
                   </svg>
-                  <span className="truncate">{sub.player_out}</span>
+                  <PlayerName id={sub.player_out_id} name={sub.player_out} className="text-red-400 truncate" />
                 </div>
               </div>
             </div>

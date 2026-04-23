@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  getPlayerProfile, getPlayerHeader, getPlayerTransferHistory,
-  type PlayerProfile,
+  getPlayerProfile, getPlayerHeader, getPlayerTransferHistory, buildPlayerTenures,
+  type PlayerProfile, type PlayerTenure,
 } from "@/lib/player-stats";
 import PlayerPhoto from "./PlayerPhoto";
+import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
+import SectionHeader from "@/components/SectionHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -53,102 +55,107 @@ export default async function PlayerPage({
 
       {profile && profile.appearances.length > 0 && (
         <div className={cardClass}>
-          <h2 className="text-lg font-semibold text-white mb-4">Appearances</h2>
-          <div className="space-y-2">
-            {profile.appearances.map((a) => (
-              <Link
-                key={a.matchId}
-                href={`/matches/${a.matchId}`}
-                className="flex items-center gap-3 text-sm hover:bg-surface rounded-lg px-2 py-2 transition-colors"
-              >
-                <div className="flex-1 min-w-0 flex items-center gap-2">
-                  {a.homeCrest && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.homeCrest} alt={a.homeTeam} className="w-4 h-4 object-contain" />
-                  )}
-                  <span className={`truncate ${a.team === "home" ? "text-accent" : "text-slate-200"}`}>
-                    {a.homeTeam}
-                  </span>
-                  <span className="text-muted tabular-nums px-1">
-                    {a.homeScore} - {a.awayScore}
-                  </span>
-                  <span className={`truncate ${a.team === "away" ? "text-accent" : "text-slate-200"}`}>
-                    {a.awayTeam}
-                  </span>
-                  {a.awayCrest && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.awayCrest} alt={a.awayTeam} className="w-4 h-4 object-contain" />
-                  )}
-                </div>
-                <span className="text-xs text-muted shrink-0 tabular-nums">{a.minutesWatched} min</span>
-                {a.goalsWatched > 0 && (
-                  <span className="text-xs text-accent shrink-0 tabular-nums">
-                    {a.goalsWatched}G
-                  </span>
-                )}
-                {a.assistsWatched > 0 && (
-                  <span className="text-xs text-muted shrink-0 tabular-nums">
-                    {a.assistsWatched}A
-                  </span>
-                )}
-                {a.yellowsWatched > 0 && (
-                  <span className="text-xs text-yellow-400 shrink-0 tabular-nums">
-                    {a.yellowsWatched}Y
-                  </span>
-                )}
-                {a.redsWatched > 0 && (
-                  <span className="text-xs text-red-400 shrink-0 tabular-nums">
-                    {a.redsWatched}R
-                  </span>
-                )}
-                <span className="text-xs text-muted shrink-0 tabular-nums">
-                  {new Date(a.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                </span>
-              </Link>
-            ))}
-          </div>
+          <SectionHeader title="Appearances" seeAllHref={`/players/${idNum}/appearances`} />
+          <PagedMatchList
+            items={profile.appearances.map<PagedMatchItem>((a) => ({
+              match: {
+                matchId: a.matchId,
+                date: a.date,
+                homeTeam: a.homeTeam,
+                homeTeamId: a.homeTeamId,
+                homeCrest: a.homeCrest,
+                homeScore: a.homeScore,
+                awayTeam: a.awayTeam,
+                awayTeamId: a.awayTeamId,
+                awayCrest: a.awayCrest,
+                awayScore: a.awayScore,
+                minutesWatched: a.minutesWatched,
+                watchedInPerson: a.watchedInPerson,
+              },
+              perspective: { kind: "player", teamId: a.teamId },
+              extras: {
+                goals: a.goalsWatched,
+                assists: a.assistsWatched,
+                yellows: a.yellowsWatched,
+                reds: a.redsWatched,
+              },
+            }))}
+            pageSize={10}
+          />
         </div>
       )}
 
-      {transfers.length > 0 && (
-        <div className={cardClass}>
-          <h2 className="text-lg font-semibold text-white mb-4">Club history</h2>
-          <ol className="space-y-3">
-            {transfers.map((t, i) => (
-              <li key={i} className="flex items-center gap-3 text-sm">
-                <span className="text-muted tabular-nums w-24 shrink-0">
-                  {t.date ? formatDate(t.date) : ""}
-                </span>
-                <TeamChip
-                  id={t.teamOut.id}
-                  name={t.teamOut.name}
-                  logo={t.teamOut.logo}
-                  muted
-                />
-                <span className="text-muted">→</span>
-                <TeamChip
-                  id={t.teamIn.id}
-                  name={t.teamIn.name}
-                  logo={t.teamIn.logo}
-                />
-                {t.type && (
-                  <span className="text-[10px] text-muted border border-card-border rounded-full px-2 py-0.5 shrink-0">
-                    {t.type}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
+      {(() => {
+        const tenures = buildPlayerTenures(transfers, header.clubId);
+        if (tenures.length === 0) return null;
+        const visible = tenures.slice(0, 10);
+        const hasMore = tenures.length > 10;
+        return (
+          <div className={cardClass}>
+            <SectionHeader
+              title="Club history"
+              seeAllHref={hasMore ? `/players/${idNum}/clubs` : undefined}
+            />
+            <ol className="[&>*]:border-b [&>*]:border-card-border/50">
+              {visible.map((t, i) => (
+                <TenureRow key={`${t.clubId ?? t.clubName}-${t.startDate}-${i}`} tenure={t} />
+              ))}
+            </ol>
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
-function formatDate(isoOrDate: string): string {
-  const d = new Date(isoOrDate);
-  if (Number.isNaN(d.getTime())) return isoOrDate;
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+function formatYear(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return String(d.getFullYear());
+}
+
+function TenureRow({ tenure }: { tenure: PlayerTenure }) {
+  const logo = tenure.clubLogo;
+  const name = tenure.clubName ?? "Unknown";
+  const startYear = formatYear(tenure.startDate);
+  const endLabel = tenure.isCurrent
+    ? "present"
+    : tenure.endDate
+    ? formatYear(tenure.endDate)
+    : null;
+  const range = endLabel ? `${startYear} – ${endLabel}` : startYear;
+
+  const clubInner = (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      {logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logo} alt={name} className="w-5 h-5 object-contain shrink-0" />
+      ) : (
+        <span className="w-5 h-5 shrink-0" />
+      )}
+      <span className="truncate text-slate-200">{name}</span>
+    </span>
+  );
+
+  return (
+    <li className="flex items-center gap-3 text-sm py-2.5">
+      <div className="flex-1 min-w-0">
+        {tenure.clubId != null ? (
+          <Link href={`/teams/${tenure.clubId}`} className="hover:text-accent transition-colors inline-flex min-w-0 max-w-full">
+            {clubInner}
+          </Link>
+        ) : (
+          clubInner
+        )}
+      </div>
+      <span className="text-xs text-muted tabular-nums shrink-0">{range}</span>
+      {tenure.isLoan && (
+        <span className="text-[10px] text-yellow-300 border border-yellow-300/40 rounded-full px-2 py-0.5 shrink-0 uppercase tracking-wide">
+          Loan
+        </span>
+      )}
+    </li>
+  );
 }
 
 function HeaderChips({
@@ -189,11 +196,8 @@ function HeaderChips({
   }
 
   if (header.nationality) {
-    chips.push(
-      <span
-        key="nat"
-        className="px-2.5 py-1 rounded-full bg-surface border border-card-border text-xs text-slate-200 inline-flex items-center gap-1.5"
-      >
+    const inner = (
+      <span className="inline-flex items-center gap-1.5">
         {header.countryCode && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -202,8 +206,26 @@ function HeaderChips({
             className="w-4 h-3 object-cover rounded-[1px]"
           />
         )}
-        {header.nationality}
+        <span>{header.nationality}</span>
       </span>
+    );
+    chips.push(
+      header.countryCode ? (
+        <Link
+          key="nat"
+          href={`/countries/${header.countryCode}`}
+          className="px-2.5 py-1 rounded-full bg-surface border border-card-border text-xs text-slate-200 hover:text-accent transition-colors"
+        >
+          {inner}
+        </Link>
+      ) : (
+        <span
+          key="nat"
+          className="px-2.5 py-1 rounded-full bg-surface border border-card-border text-xs text-slate-200"
+        >
+          {inner}
+        </span>
+      )
     );
   }
 
@@ -232,37 +254,6 @@ function HeaderChips({
   if (chips.length === 0) return null;
 
   return <div className="flex flex-wrap gap-2 mt-3">{chips}</div>;
-}
-
-function TeamChip({
-  id,
-  name,
-  logo,
-  muted,
-}: {
-  id: number | null;
-  name: string | null;
-  logo: string | null;
-  muted?: boolean;
-}) {
-  if (!name) return <span className="text-muted italic">—</span>;
-  const inner = (
-    <span className={`inline-flex items-center gap-1.5 ${muted ? "text-muted" : "text-slate-200"}`}>
-      {logo && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={logo} alt={name} className="w-4 h-4 object-contain shrink-0" />
-      )}
-      <span className="truncate">{name}</span>
-    </span>
-  );
-  if (id != null) {
-    return (
-      <Link href={`/teams/${id}`} className="hover:text-accent transition-colors max-w-[10rem]">
-        {inner}
-      </Link>
-    );
-  }
-  return <span className="max-w-[10rem]">{inner}</span>;
 }
 
 function StatsGrid({ profile }: { profile: PlayerProfile }) {

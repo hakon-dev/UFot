@@ -75,6 +75,18 @@ if (!columnNames.includes("home_formation")) {
 if (!columnNames.includes("away_formation")) {
   db.exec("ALTER TABLE matches ADD COLUMN away_formation TEXT");
 }
+if (!columnNames.includes("competition_id")) {
+  db.exec("ALTER TABLE matches ADD COLUMN competition_id INTEGER");
+}
+if (!columnNames.includes("venue_id")) {
+  db.exec("ALTER TABLE matches ADD COLUMN venue_id INTEGER");
+}
+if (!columnNames.includes("venue_city")) {
+  db.exec("ALTER TABLE matches ADD COLUMN venue_city TEXT");
+}
+if (!columnNames.includes("watched_in_person")) {
+  db.exec("ALTER TABLE matches ADD COLUMN watched_in_person INTEGER DEFAULT 0");
+}
 
 // Detail tables
 db.exec(`
@@ -184,6 +196,17 @@ if (!teamColumns.includes("national")) {
 }
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS competitions (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    country TEXT,
+    country_code TEXT,
+    logo TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS player_transfers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id INTEGER NOT NULL,
@@ -215,6 +238,20 @@ db.exec(`
 // null IDs (or no cards) would trigger a re-fetch on every server restart.
 //   v1 — scorer_id/assist_id landed; force a re-fetch so existing rows pick them up.
 //   v2 — match_cards table added; force a re-fetch so existing rows get card events.
+//   v3 — player-name resolution switched from raw `firstname + ' ' + lastname` (which produced
+//        legal-full-name forms like "Luke Paul Hoare Shaw") to `expandAbbreviatedName`. Wipe the
+//        players cache so future /players/profiles fetches repopulate with the commonly-used
+//        form. enrichPlayerStatsWithNationality then fills it back in, bounded by its budget.
+//   v4 — `expandAbbreviatedName` now keeps the abbreviation when `firstname[0]` doesn't match
+//        the abbreviation's initial (Harry Maguire's legal firstname is "Jacob" → "H. Maguire"
+//        shouldn't become "Jacob Maguire"). Wipe the players cache again so entries written
+//        under the prior logic are re-fetched.
+//   v5 — `fetchPlayerProfile` now falls back to `/players?id=X&season=Y` when expansion can't
+//        recover the common name from firstname. Wipe the players cache so Harry-Maguire-style
+//        entries try the new fallback path.
+//   v6 — `expandAbbreviatedName` now scans ALL words in firstname (which may contain multiple
+//        given names like "Jacob Harry" for Harry Maguire) rather than just the first word.
+//        Wipe the players cache so mismatched entries re-run through the new scan.
 const userVersion = db.pragma("user_version", { simple: true }) as number;
 if (userVersion < 2) {
   db.exec(`
@@ -227,6 +264,10 @@ if (userVersion < 2) {
   db.exec(`DELETE FROM match_lineups WHERE match_id IN (SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football')`);
   db.exec(`DELETE FROM match_cards WHERE match_id IN (SELECT id FROM matches WHERE details_fetched = 0 AND external_source = 'api-football')`);
   db.pragma("user_version = 2");
+}
+if (userVersion < 6) {
+  db.exec(`DELETE FROM players`);
+  db.pragma("user_version = 6");
 }
 
 // NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null
@@ -260,6 +301,10 @@ export interface Match {
   away_team_id: number | null;
   home_formation: string | null;
   away_formation: string | null;
+  competition_id: number | null;
+  venue_id: number | null;
+  venue_city: string | null;
+  watched_in_person: number;
 }
 
 export interface MatchGoal {
@@ -342,26 +387,110 @@ export function createMatch(data: {
   watchIntervals?: number[][];
   homeTeamId?: number;
   awayTeamId?: number;
+  competitionId?: number;
+  venueId?: number;
+  venueCity?: string;
+  watchedInPerson?: boolean;
 }): Match {
   const id = crypto.randomUUID();
   const intervals = JSON.stringify(data.watchIntervals ?? [[0, 90]]);
   const source = data.externalMatchId != null ? (data.externalSource ?? "api-football") : null;
   const stmt = db.prepare(`
-    INSERT INTO matches (id, home_team, away_team, home_score, away_score, competition, round, date, venue, home_crest, away_crest, external_match_id, external_source, watch_intervals, home_team_id, away_team_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO matches (id, home_team, away_team, home_score, away_score, competition, round, date, venue, home_crest, away_crest, external_match_id, external_source, watch_intervals, home_team_id, away_team_id, competition_id, venue_id, venue_city, watched_in_person)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(
     id, data.homeTeam, data.awayTeam, data.homeScore, data.awayScore,
     data.competition || null, data.round || null, data.date, data.venue || null,
     data.homeCrest || null, data.awayCrest || null,
     data.externalMatchId ?? null, source, intervals,
-    data.homeTeamId ?? null, data.awayTeamId ?? null
+    data.homeTeamId ?? null, data.awayTeamId ?? null,
+    data.competitionId ?? null,
+    data.venueId ?? null, data.venueCity || null,
+    data.watchedInPerson ? 1 : 0
   );
   return db.prepare("SELECT * FROM matches WHERE id = ?").get(id) as Match;
 }
 
 export function updateWatchIntervals(matchId: string, intervals: number[][]): void {
   db.prepare("UPDATE matches SET watch_intervals = ? WHERE id = ?").run(JSON.stringify(intervals), matchId);
+}
+
+export function updateMatchWatchedInPerson(matchId: string, watched: boolean): void {
+  db.prepare("UPDATE matches SET watched_in_person = ? WHERE id = ?").run(watched ? 1 : 0, matchId);
+}
+
+export function getMatchesByVenueId(venueId: number): Match[] {
+  return db
+    .prepare("SELECT * FROM matches WHERE venue_id = ? ORDER BY date DESC, created_at DESC")
+    .all(venueId) as Match[];
+}
+
+export interface StadiumAggregate {
+  venueId: number;
+  venueName: string;
+  venueCity: string | null;
+  totalMatches: number;
+  totalMinutes: number;
+  inPersonMatches: number;
+  inPersonMinutes: number;
+  firstVisit: string | null;
+  lastVisit: string | null;
+}
+
+export function getStadiumAggregates(): StadiumAggregate[] {
+  const rows = db
+    .prepare(
+      `SELECT venue_id, venue, venue_city, watch_intervals, watched_in_person, date
+       FROM matches WHERE venue_id IS NOT NULL`
+    )
+    .all() as Array<{
+      venue_id: number;
+      venue: string | null;
+      venue_city: string | null;
+      watch_intervals: string | null;
+      watched_in_person: number;
+      date: string;
+    }>;
+
+  const map = new Map<number, StadiumAggregate>();
+  for (const r of rows) {
+    const intervals: number[][] = (() => {
+      try {
+        return JSON.parse(r.watch_intervals || "[[0,90]]");
+      } catch {
+        return [[0, 90]];
+      }
+    })();
+    const mins = intervals.reduce((s, [a, b]) => s + (b - a), 0);
+    const inPerson = r.watched_in_person === 1;
+    let agg = map.get(r.venue_id);
+    if (!agg) {
+      agg = {
+        venueId: r.venue_id,
+        venueName: r.venue || "Unknown",
+        venueCity: r.venue_city,
+        totalMatches: 0,
+        totalMinutes: 0,
+        inPersonMatches: 0,
+        inPersonMinutes: 0,
+        firstVisit: null,
+        lastVisit: null,
+      };
+      map.set(r.venue_id, agg);
+    } else if (!agg.venueCity && r.venue_city) {
+      agg.venueCity = r.venue_city;
+    }
+    agg.totalMatches += 1;
+    agg.totalMinutes += mins;
+    if (inPerson) {
+      agg.inPersonMatches += 1;
+      agg.inPersonMinutes += mins;
+    }
+    if (!agg.firstVisit || r.date < agg.firstVisit) agg.firstVisit = r.date;
+    if (!agg.lastVisit || r.date > agg.lastVisit) agg.lastVisit = r.date;
+  }
+  return [...map.values()];
 }
 
 export function saveMatchDetails(
@@ -508,6 +637,10 @@ export function getPlayers(ids: number[]): Map<number, PlayerRecord> {
   return map;
 }
 
+export function getAllCachedPlayers(): PlayerRecord[] {
+  return db.prepare("SELECT * FROM players").all() as PlayerRecord[];
+}
+
 export function upsertPlayer(record: {
   id: number;
   name: string;
@@ -576,6 +709,76 @@ export function upsertTeam(record: {
   ).run(
     record.id, record.name, record.country, record.countryCode, record.logo,
     record.national == null ? null : record.national ? 1 : 0
+  );
+}
+
+export interface CompetitionRecord {
+  id: number;
+  name: string;
+  country: string | null;
+  country_code: string | null;
+  logo: string | null;
+  fetched_at: string;
+}
+
+export function getCompetitions(ids: number[]): Map<number, CompetitionRecord> {
+  const map = new Map<number, CompetitionRecord>();
+  if (ids.length === 0) return map;
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT * FROM competitions WHERE id IN (${placeholders})`)
+    .all(...ids) as CompetitionRecord[];
+  for (const row of rows) map.set(row.id, row);
+  return map;
+}
+
+export function getCompetition(id: number): CompetitionRecord | undefined {
+  return db.prepare("SELECT * FROM competitions WHERE id = ?").get(id) as CompetitionRecord | undefined;
+}
+
+export function getCompetitionsByCountryCode(code: string): CompetitionRecord[] {
+  return db
+    .prepare("SELECT * FROM competitions WHERE country_code = ? ORDER BY name")
+    .all(code) as CompetitionRecord[];
+}
+
+export function getTeamsByCountryCode(code: string): TeamRecord[] {
+  return db
+    .prepare("SELECT * FROM teams WHERE country_code = ? ORDER BY name")
+    .all(code) as TeamRecord[];
+}
+
+// Returns the set of team IDs (among the given ids) that are flagged as national teams.
+// Unknown ids (no cached team row) are treated as non-national.
+export function nationalTeamIds(ids: number[]): Set<number> {
+  const out = new Set<number>();
+  if (ids.length === 0) return out;
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT id FROM teams WHERE national = 1 AND id IN (${placeholders})`)
+    .all(...ids) as { id: number }[];
+  for (const r of rows) out.add(r.id);
+  return out;
+}
+
+export function upsertCompetition(record: {
+  id: number;
+  name: string;
+  country: string | null;
+  countryCode: string | null;
+  logo: string | null;
+}): void {
+  db.prepare(
+    `INSERT INTO competitions (id, name, country, country_code, logo, fetched_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       country = excluded.country,
+       country_code = excluded.country_code,
+       logo = excluded.logo,
+       fetched_at = excluded.fetched_at`
+  ).run(
+    record.id, record.name, record.country, record.countryCode, record.logo
   );
 }
 

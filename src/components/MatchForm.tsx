@@ -9,6 +9,7 @@ export default function MatchForm() {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [watchIntervals, setWatchIntervals] = useState<number[][]>([[0, 90]]);
+  const [watchedInPerson, setWatchedInPerson] = useState(false);
   const [formData, setFormData] = useState({
     homeTeam: "",
     awayTeam: "",
@@ -33,7 +34,7 @@ export default function MatchForm() {
     await fetch("/api/matches", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...formData, watchIntervals }),
+      body: JSON.stringify({ ...formData, watchIntervals, watchedInPerson }),
     });
 
     router.push("/");
@@ -118,6 +119,15 @@ export default function MatchForm() {
                 <input id="venue" name="venue" className={inputClass} placeholder="e.g. Anfield" value={formData.venue} onChange={handleChange} />
               </div>
             </div>
+            <label className="flex items-center gap-2.5 text-sm text-slate-200 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={watchedInPerson}
+                onChange={(e) => setWatchedInPerson(e.target.checked)}
+                className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+              />
+              Watched in person at the stadium
+            </label>
           </div>
 
           {/* Watch Intervals */}

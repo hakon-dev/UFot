@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { HeaderButton, Pagination, usePagedRows, type SortDir } from "./_components/TableUtils";
 
 interface PlayerStat {
   playerId: number | null;
@@ -29,7 +30,6 @@ type SortKey =
   | "assistsWatched"
   | "yellowsWatched"
   | "redsWatched";
-type SortDir = "asc" | "desc";
 
 const NUMERIC_KEYS: SortKey[] = [
   "minutesWatched",
@@ -72,7 +72,7 @@ function PhotoCell({ playerId, name }: { playerId: number | null; name: string }
 function ClubCell({ club, clubId, clubCrest }: { club: string | null; clubId: number | null; clubCrest: string | null }) {
   if (!club) return <span className="text-muted">-</span>;
   const inner = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0">
       {clubCrest ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={clubCrest} alt={club} className="w-4 h-4 object-contain shrink-0" />
@@ -84,64 +84,63 @@ function ClubCell({ club, clubId, clubCrest }: { club: string | null; clubId: nu
   );
   if (clubId != null) {
     return (
-      <Link href={`/teams/${clubId}`} className="hover:text-accent transition-colors inline-block max-w-[10rem]">
+      <Link href={`/teams/${clubId}`} className="hover:text-accent transition-colors block max-w-full">
         {inner}
       </Link>
     );
   }
-  return <div className="max-w-[10rem]">{inner}</div>;
+  return inner;
 }
 
 function NationalityCell({ nationality, countryCode }: { nationality: string | null; countryCode: string | null }) {
   if (!nationality) return <span className="text-muted">-</span>;
-  return (
-    <div className="flex items-center gap-2">
-      {countryCode ? (
-        // eslint-disable-next-line @next/next/no-img-element
+  if (countryCode) {
+    return (
+      <Link
+        href={`/countries/${countryCode}`}
+        className="flex items-center gap-2 min-w-0 hover:text-accent transition-colors"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={`https://flagcdn.com/${countryCode}.svg`}
           alt={nationality}
           className="w-5 h-3.5 object-cover rounded-sm ring-1 ring-card-border shrink-0"
         />
-      ) : (
-        <div className="w-5 h-3.5 shrink-0" />
-      )}
+        <span className="truncate">{nationality}</span>
+      </Link>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <div className="w-5 h-3.5 shrink-0" />
       <span className="truncate">{nationality}</span>
     </div>
   );
 }
 
-function SortArrow({ dir }: { dir: SortDir }) {
-  return <span className="ml-1 text-[10px] text-accent">{dir === "asc" ? "▲" : "▼"}</span>;
-}
-
-function HeaderButton({
-  label,
-  sortKey,
-  currentKey,
-  currentDir,
-  onSort,
-  align,
+function StatValue({
+  value,
+  suffix,
+  tone,
 }: {
-  label: string;
-  sortKey: SortKey;
-  currentKey: SortKey;
-  currentDir: SortDir;
-  onSort: (key: SortKey) => void;
-  align: "left" | "center";
+  value: number;
+  suffix: string;
+  tone: "accent" | "slate" | "yellow" | "red";
 }) {
-  const isActive = currentKey === sortKey;
+  if (!value) return <span className="text-muted/50">–</span>;
+  const color =
+    tone === "accent"
+      ? "text-accent"
+      : tone === "yellow"
+      ? "text-yellow-400"
+      : tone === "red"
+      ? "text-red-400"
+      : "text-slate-300";
   return (
-    <button
-      type="button"
-      onClick={() => onSort(sortKey)}
-      className={`inline-flex items-center ${
-        align === "center" ? "justify-center" : "justify-start"
-      } gap-0.5 font-medium hover:text-accent transition-colors w-full`}
-    >
-      {label}
-      {isActive && <SortArrow dir={currentDir} />}
-    </button>
+    <span className={color}>
+      {value}
+      {suffix}
+    </span>
   );
 }
 
@@ -154,7 +153,6 @@ function compare(a: PlayerStat, b: PlayerStat, key: SortKey, dir: SortDir): numb
     return (av - bv) * mult;
   }
 
-  // String columns: null/empty sort to the end regardless of direction.
   const av =
     key === "name" ? a.name : key === "club" ? a.club : a.nationality;
   const bv =
@@ -167,8 +165,13 @@ function compare(a: PlayerStat, b: PlayerStat, key: SortKey, dir: SortDir): numb
   return av!.localeCompare(bv!) * mult;
 }
 
-export default function PlayerStatsTable({ players }: { players: PlayerStat[] }) {
-  const [showAll, setShowAll] = useState(false);
+export default function PlayerStatsTable({
+  players,
+  pageSize = 10,
+}: {
+  players: PlayerStat[];
+  pageSize?: number | null;
+}) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutesWatched");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -195,9 +198,7 @@ export default function PlayerStatsTable({ players }: { players: PlayerStat[] })
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
   }, [players, filter, sortKey, sortDir]);
 
-  // When filtering, show everything — a user typing a search expects hits not to be hidden.
-  const isFiltering = filter.trim().length > 0;
-  const displayed = isFiltering || showAll ? processed : processed.slice(0, 20);
+  const { page, setPage, pageCount, visible } = usePagedRows(processed, pageSize);
 
   return (
     <>
@@ -212,7 +213,18 @@ export default function PlayerStatsTable({ players }: { players: PlayerStat[] })
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col />
+            <col className="w-44" />
+            <col className="w-44" />
+            <col className="w-16" />
+            <col className="w-16" />
+            <col className="w-14" />
+            <col className="w-16" />
+            <col className="w-10" />
+            <col className="w-10" />
+          </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
               <th className="text-left pb-3">
@@ -245,11 +257,11 @@ export default function PlayerStatsTable({ players }: { players: PlayerStat[] })
             </tr>
           </thead>
           <tbody>
-            {displayed.map((p, i) => {
+            {visible.map((p, i) => {
               const nameCell = (
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
                   <PhotoCell playerId={p.playerId} name={p.name} />
-                  <span>{p.name}</span>
+                  <span className="truncate">{p.name}</span>
                 </div>
               );
               return (
@@ -258,7 +270,7 @@ export default function PlayerStatsTable({ players }: { players: PlayerStat[] })
                     {p.playerId != null ? (
                       <Link
                         href={`/players/${p.playerId}`}
-                        className="hover:text-accent transition-colors inline-block"
+                        className="hover:text-accent transition-colors block max-w-full"
                       >
                         {nameCell}
                       </Link>
@@ -272,45 +284,36 @@ export default function PlayerStatsTable({ players }: { players: PlayerStat[] })
                   <td className="py-2.5 text-slate-300">
                     <NationalityCell nationality={p.nationality} countryCode={p.countryCode} />
                   </td>
-                  <td className="py-2.5 text-center text-slate-300 tabular-nums">{p.minutesWatched}</td>
-                  <td className="py-2.5 text-center text-muted tabular-nums">{p.matches}</td>
-                  <td className="py-2.5 text-center text-accent tabular-nums">{p.goalsWatched || "-"}</td>
-                  <td className="py-2.5 text-center text-muted tabular-nums">{p.assistsWatched || "-"}</td>
+                  <td className="py-2.5 text-center text-accent tabular-nums">
+                    {p.minutesWatched}′
+                  </td>
+                  <td className="py-2.5 text-center text-slate-300 tabular-nums">{p.matches}</td>
                   <td className="py-2.5 text-center tabular-nums">
-                    {p.yellowsWatched > 0 ? (
-                      <span className="text-yellow-400">{p.yellowsWatched}</span>
-                    ) : (
-                      <span className="text-muted">-</span>
-                    )}
+                    <StatValue value={p.goalsWatched} suffix="G" tone="accent" />
                   </td>
                   <td className="py-2.5 text-center tabular-nums">
-                    {p.redsWatched > 0 ? (
-                      <span className="text-red-400">{p.redsWatched}</span>
-                    ) : (
-                      <span className="text-muted">-</span>
-                    )}
+                    <StatValue value={p.assistsWatched} suffix="A" tone="slate" />
+                  </td>
+                  <td className="py-2.5 text-center tabular-nums">
+                    <StatValue value={p.yellowsWatched} suffix="Y" tone="yellow" />
+                  </td>
+                  <td className="py-2.5 text-center tabular-nums">
+                    <StatValue value={p.redsWatched} suffix="R" tone="red" />
                   </td>
                 </tr>
               );
             })}
-            {displayed.length === 0 && (
+            {visible.length === 0 && (
               <tr>
                 <td colSpan={9} className="py-6 text-center text-muted">
-                  No players match &quot;{filter}&quot;.
+                  {filter ? `No players match "${filter}".` : "No players yet."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      {!isFiltering && processed.length > 20 && (
-        <button
-          onClick={() => setShowAll(!showAll)}
-          className="text-xs text-muted hover:text-accent transition-colors mt-3"
-        >
-          {showAll ? "Show top 20" : `Show all ${processed.length} players`}
-        </button>
-      )}
+      <Pagination page={page} pageCount={pageCount} setPage={setPage} />
     </>
   );
 }

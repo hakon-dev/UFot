@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { HeaderButton, Pagination, usePagedRows, type SortDir } from "./_components/TableUtils";
 
 export interface TeamStat {
   team: string;
@@ -15,44 +16,9 @@ export interface TeamStat {
   goalsAgainst: number;
 }
 
-type SortKey = "team" | "country" | "matches" | "minutes" | "goalsFor" | "goalsAgainst";
-type SortDir = "asc" | "desc";
+type SortKey = "team" | "country" | "minutes" | "matches" | "goalsFor" | "goalsAgainst";
 
 const NUMERIC_KEYS: SortKey[] = ["matches", "minutes", "goalsFor", "goalsAgainst"];
-
-function SortArrow({ dir }: { dir: SortDir }) {
-  return <span className="ml-1 text-[10px] text-accent">{dir === "asc" ? "▲" : "▼"}</span>;
-}
-
-function HeaderButton({
-  label,
-  sortKey,
-  currentKey,
-  currentDir,
-  onSort,
-  align,
-}: {
-  label: string;
-  sortKey: SortKey;
-  currentKey: SortKey;
-  currentDir: SortDir;
-  onSort: (key: SortKey) => void;
-  align: "left" | "center";
-}) {
-  const isActive = currentKey === sortKey;
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(sortKey)}
-      className={`inline-flex items-center ${
-        align === "center" ? "justify-center" : "justify-start"
-      } gap-0.5 font-medium hover:text-accent transition-colors w-full`}
-    >
-      {label}
-      {isActive && <SortArrow dir={currentDir} />}
-    </button>
-  );
-}
 
 function compare(a: TeamStat, b: TeamStat, key: SortKey, dir: SortDir): number {
   const mult = dir === "asc" ? 1 : -1;
@@ -69,7 +35,13 @@ function compare(a: TeamStat, b: TeamStat, key: SortKey, dir: SortDir): number {
   return av!.localeCompare(bv!) * mult;
 }
 
-export default function TeamStatsTable({ teams }: { teams: TeamStat[] }) {
+export default function TeamStatsTable({
+  teams,
+  pageSize = 10,
+}: {
+  teams: TeamStat[];
+  pageSize?: number | null;
+}) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -95,6 +67,8 @@ export default function TeamStatsTable({ teams }: { teams: TeamStat[] }) {
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
   }, [teams, filter, sortKey, sortDir]);
 
+  const { page, setPage, pageCount, visible } = usePagedRows(processed, pageSize);
+
   return (
     <>
       <div className="mb-3">
@@ -108,7 +82,15 @@ export default function TeamStatsTable({ teams }: { teams: TeamStat[] }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col />
+            <col className="w-44" />
+            <col className="w-24" />
+            <col className="w-24" />
+            <col className="w-16" />
+            <col className="w-16" />
+          </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
               <th className="text-left pb-3">
@@ -118,10 +100,10 @@ export default function TeamStatsTable({ teams }: { teams: TeamStat[] }) {
                 <HeaderButton label="Country" sortKey="country" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
               </th>
               <th className="text-center pb-3">
-                <HeaderButton label="Matches" sortKey="matches" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+                <HeaderButton label="Minutes" sortKey="minutes" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
               </th>
               <th className="text-center pb-3">
-                <HeaderButton label="Minutes" sortKey="minutes" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+                <HeaderButton label="Matches" sortKey="matches" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
               </th>
               <th className="text-center pb-3">
                 <HeaderButton label="GF" sortKey="goalsFor" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
@@ -132,25 +114,25 @@ export default function TeamStatsTable({ teams }: { teams: TeamStat[] }) {
             </tr>
           </thead>
           <tbody>
-            {processed.map((t) => {
+            {visible.map((t) => {
               const cellInner = (
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
                   {t.crest ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={t.crest} alt={t.team} className="w-5 h-5 object-contain" />
+                    <img src={t.crest} alt={t.team} className="w-5 h-5 object-contain shrink-0" />
                   ) : (
-                    <svg className="w-5 h-5 text-muted/40" viewBox="0 0 24 24" fill="currentColor">
+                    <svg className="w-5 h-5 text-muted/40 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 2L3 7v5c0 5.25 3.83 10.15 9 11.25C17.17 22.15 21 17.25 21 12V7l-9-5zm0 2.18l7 3.89v4.93c0 4.29-3.08 8.28-7 9.18-3.92-.9-7-4.89-7-9.18V8.07l7-3.89z" />
                     </svg>
                   )}
-                  <span>{t.team}</span>
+                  <span className="truncate">{t.team}</span>
                 </div>
               );
               return (
                 <tr key={t.teamId ?? t.team} className="border-b border-card-border/50">
                   <td className="py-2.5 text-slate-200 font-medium">
                     {t.teamId != null ? (
-                      <Link href={`/teams/${t.teamId}`} className="hover:text-accent transition-colors inline-block">
+                      <Link href={`/teams/${t.teamId}`} className="hover:text-accent transition-colors block max-w-full">
                         {cellInner}
                       </Link>
                     ) : (
@@ -159,31 +141,37 @@ export default function TeamStatsTable({ teams }: { teams: TeamStat[] }) {
                   </td>
                   <td className="py-2.5 text-slate-300">
                     {t.country ? (
-                      <div className="flex items-center gap-2">
-                        {t.countryCode ? (
-                          // eslint-disable-next-line @next/next/no-img-element
+                      t.countryCode ? (
+                        <Link
+                          href={`/countries/${t.countryCode}`}
+                          className="flex items-center gap-2 min-w-0 hover:text-accent transition-colors"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={`https://flagcdn.com/${t.countryCode}.svg`}
                             alt={t.country}
                             className="w-5 h-3.5 object-cover rounded-sm ring-1 ring-card-border shrink-0"
                           />
-                        ) : (
+                          <span className="truncate">{t.country}</span>
+                        </Link>
+                      ) : (
+                        <div className="flex items-center gap-2 min-w-0">
                           <div className="w-5 h-3.5 shrink-0" />
-                        )}
-                        <span className="truncate">{t.country}</span>
-                      </div>
+                          <span className="truncate">{t.country}</span>
+                        </div>
+                      )
                     ) : (
                       <span className="text-muted">-</span>
                     )}
                   </td>
-                  <td className="py-2.5 text-center text-slate-300 tabular-nums">{t.matches}</td>
                   <td className="py-2.5 text-center text-accent tabular-nums">{t.minutes.toLocaleString()}</td>
+                  <td className="py-2.5 text-center text-slate-300 tabular-nums">{t.matches}</td>
                   <td className="py-2.5 text-center text-slate-300 tabular-nums">{t.goalsFor}</td>
                   <td className="py-2.5 text-center text-muted tabular-nums">{t.goalsAgainst}</td>
                 </tr>
               );
             })}
-            {processed.length === 0 && (
+            {visible.length === 0 && (
               <tr>
                 <td colSpan={6} className="py-6 text-center text-muted">
                   No teams match &quot;{filter}&quot;.
@@ -193,6 +181,7 @@ export default function TeamStatsTable({ teams }: { teams: TeamStat[] }) {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} pageCount={pageCount} setPage={setPage} />
     </>
   );
 }

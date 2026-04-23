@@ -73,14 +73,43 @@ export default async function MatchDetailPage({
         </div>
 
         {/* Metadata */}
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
           {match.competition && (
-            <span className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full">
-              {match.competition}
-            </span>
+            match.competition_id != null ? (
+              <Link
+                href={`/competitions/${match.competition_id}`}
+                className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full hover:text-accent transition-colors"
+              >
+                {match.competition}
+              </Link>
+            ) : (
+              <span className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full">
+                {match.competition}
+              </span>
+            )
           )}
           {match.round && <span>{match.round}</span>}
-          {match.venue && <span>{match.venue}</span>}
+          {match.venue && (
+            match.venue_id != null ? (
+              <Link
+                href={`/stadiums/${match.venue_id}`}
+                className="hover:text-accent transition-colors"
+              >
+                {match.venue}
+                {match.venue_city ? ` · ${match.venue_city}` : ""}
+              </Link>
+            ) : (
+              <span>
+                {match.venue}
+                {match.venue_city ? ` · ${match.venue_city}` : ""}
+              </span>
+            )
+          )}
+          {match.watched_in_person === 1 && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+              In person
+            </span>
+          )}
         </div>
       </div>
 
@@ -89,6 +118,7 @@ export default async function MatchDetailPage({
         matchId={match.id}
         canFetchDetails={match.external_match_id !== null && match.external_source === "api-football"}
         initialIntervals={watchIntervals}
+        initialWatchedInPerson={match.watched_in_person === 1}
         homeTeam={match.home_team}
         awayTeam={match.away_team}
         homeTeamId={match.home_team_id}

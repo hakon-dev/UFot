@@ -167,6 +167,22 @@ export function countryNameToCode(name: string | null | undefined): string | nul
   return COUNTRY_CODES[name] ?? COUNTRY_CODES[name.trim()] ?? null;
 }
 
+// Reverse map: ISO2/subdivision code → canonical country name. Several names map to the same
+// code (e.g. "USA" and "United States" both → "us"); the first entry wins, which gives us the
+// most common display name for each code.
+const CODE_TO_COUNTRY: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const [name, code] of Object.entries(COUNTRY_CODES)) {
+    if (!(code in out)) out[code] = name;
+  }
+  return out;
+})();
+
+export function codeToCountryName(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return CODE_TO_COUNTRY[code.toLowerCase()] ?? null;
+}
+
 export function flagUrl(code: string | null | undefined): string | null {
   if (!code) return null;
   return `https://flagcdn.com/${code}.svg`;

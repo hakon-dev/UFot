@@ -1,25 +1,46 @@
-import { getAllMatches, getMatchesWithDetails } from "@/lib/db";
+import Link from "next/link";
+import { getAllMatches, getMatchesWithDetails, getStadiumAggregates } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
 import { computePlayerStats, enrichPlayerStatsWithNationality } from "@/lib/player-stats";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
+import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
+import { aggregateCompetitions, aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
 import PlayerStatsTable from "./PlayerStatsTable";
-import CompetitionStatsTable, { type CompetitionStat } from "./CompetitionStatsTable";
-import TeamStatsTable, { type TeamStat } from "./TeamStatsTable";
+import CompetitionStatsTable from "./CompetitionStatsTable";
+import TeamStatsTable from "./TeamStatsTable";
+import StadiumStatsTable, { type StadiumStat } from "../stadiums/StadiumStatsTable";
+import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 
 export const dynamic = "force-dynamic";
 
-function minutesOf(rawIntervals: string | null): number {
-  try {
-    const intervals: number[][] = JSON.parse(rawIntervals || "[[0,90]]");
-    return intervals.reduce((s, [a, b]) => s + (b - a), 0);
-  } catch {
-    return 90;
-  }
+function OverviewCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="bg-card rounded-xl p-5 border border-card-border flex flex-col items-center text-center">
+      <p className="text-xs uppercase tracking-wide text-muted leading-tight min-h-[2rem] flex items-center">
+        {label}
+      </p>
+      <p className="text-3xl font-bold text-accent tabular-nums mt-1">{value}</p>
+    </div>
+  );
+}
+
+function SectionHeader({ title, href }: { title: string; href: string }) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-baseline justify-between mb-4 -mx-1 px-1 rounded hover:bg-surface/40 transition-colors"
+    >
+      <h2 className="text-lg font-semibold text-white group-hover:text-accent transition-colors">
+        {title}
+      </h2>
+      <span className="text-xs text-muted group-hover:text-accent transition-colors shrink-0 ml-3">
+        See all →
+      </span>
+    </Link>
+  );
 }
 
 export default async function StatsPage() {
-  // Backfill any matches whose details never landed (failed POST-time hydration, transient API
-  // errors). Bounded per load to respect the 100/day api-football budget — 5 matches = 15 req.
   await hydratePendingMatches(5);
 
   const matches = getAllMatches();
@@ -27,68 +48,57 @@ export default async function StatsPage() {
   const totalMatches = matches.length;
   const totalGoals = matches.reduce((sum, m) => sum + m.home_score + m.away_score, 0);
   const totalMinutesWatched = matches.reduce((sum, m) => sum + minutesOf(m.watch_intervals), 0);
+  const inPersonCount = matches.reduce((n, m) => n + (m.watched_in_person === 1 ? 1 : 0), 0);
+
+  const stadiumAggregates = getStadiumAggregates();
+  const stadiumTotalRows: StadiumStat[] = stadiumAggregates.map((a) => ({
+    venueId: a.venueId,
+    venueName: a.venueName,
+    venueCity: a.venueCity,
+    matches: a.totalMatches,
+    minutes: a.totalMinutes,
+  }));
+  const stadiumInPersonRows: StadiumStat[] = stadiumAggregates
+    .filter((a) => a.inPersonMatches > 0)
+    .map((a) => ({
+      venueId: a.venueId,
+      venueName: a.venueName,
+      venueCity: a.venueCity,
+      matches: a.inPersonMatches,
+      minutes: a.inPersonMinutes,
+    }));
 
   const matchesWithDetails = getMatchesWithDetails();
   const playerStats = computePlayerStats(matchesWithDetails);
   await enrichPlayerStatsWithNationality(playerStats);
 
-  // Competition aggregation: matches + minutes per competition.
-  const compMap = new Map<string, CompetitionStat>();
-  for (const m of matches) {
-    const comp = m.competition || "Unknown";
-    const mins = minutesOf(m.watch_intervals);
-    const existing = compMap.get(comp);
-    if (existing) {
-      existing.matches += 1;
-      existing.minutes += mins;
-    } else {
-      compMap.set(comp, { competition: comp, matches: 1, minutes: mins });
-    }
-  }
-  const competitions = [...compMap.values()];
+  const competitions = aggregateCompetitions(matches);
+  await enrichCompetitionRecordsWithDetails(competitions);
 
-  // Team aggregation: matches, minutes, goals-for, goals-against per team.
-  const teamMap = new Map<string, TeamStat>();
-  function ensureTeam(name: string, crest: string | null, teamId: number | null): TeamStat {
-    let rec = teamMap.get(name);
-    if (!rec) {
-      rec = {
-        team: name,
-        teamId,
-        crest,
-        country: null,
-        countryCode: null,
-        matches: 0,
-        minutes: 0,
-        goalsFor: 0,
-        goalsAgainst: 0,
-      };
-      teamMap.set(name, rec);
-    } else {
-      if (!rec.crest && crest) rec.crest = crest;
-      if (rec.teamId == null && teamId != null) rec.teamId = teamId;
-    }
-    return rec;
-  }
-
-  for (const m of matches) {
-    const mins = minutesOf(m.watch_intervals);
-    const home = ensureTeam(m.home_team, m.home_crest, m.home_team_id);
-    const away = ensureTeam(m.away_team, m.away_crest, m.away_team_id);
-    home.matches += 1;
-    home.minutes += mins;
-    home.goalsFor += m.home_score;
-    home.goalsAgainst += m.away_score;
-    away.matches += 1;
-    away.minutes += mins;
-    away.goalsFor += m.away_score;
-    away.goalsAgainst += m.home_score;
-  }
-
-  const teams = [...teamMap.values()];
+  const teams = aggregateTeams(matches);
   await enrichTeamRecordsWithCountry(teams);
 
-  const cardClass = "bg-card rounded-xl p-6 border border-card-border";
+  const inPersonItems: PagedMatchItem[] = matches
+    .filter((m) => m.watched_in_person === 1)
+    .map((m) => ({
+      match: {
+        matchId: m.id,
+        date: m.date,
+        homeTeam: m.home_team,
+        homeTeamId: m.home_team_id,
+        homeCrest: m.home_crest,
+        homeScore: m.home_score,
+        awayTeam: m.away_team,
+        awayTeamId: m.away_team_id,
+        awayCrest: m.away_crest,
+        awayScore: m.away_score,
+        minutesWatched: minutesOf(m.watch_intervals),
+        watchedInPerson: true,
+      },
+      perspective: { kind: "neutral" },
+    }));
+
+  const sectionClass = "bg-card rounded-xl p-6 border border-card-border";
 
   return (
     <div>
@@ -100,45 +110,58 @@ export default async function StatsPage() {
         </p>
       ) : (
         <div className="space-y-6">
-          {/* Overview */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className={cardClass}>
-              <p className="text-sm text-muted">Matches Watched</p>
-              <p className="text-3xl font-bold text-accent mt-1">{totalMatches}</p>
-            </div>
-            <div className={cardClass}>
-              <p className="text-sm text-muted">Total Minutes</p>
-              <p className="text-3xl font-bold text-accent mt-1">{totalMinutesWatched.toLocaleString()}</p>
-            </div>
-            <div className={cardClass}>
-              <p className="text-sm text-muted">Total Goals Seen</p>
-              <p className="text-3xl font-bold text-accent mt-1">{totalGoals}</p>
-            </div>
-            <div className={cardClass}>
-              <p className="text-sm text-muted">Avg Goals/Match</p>
-              <p className="text-3xl font-bold text-accent mt-1">
-                {(totalGoals / totalMatches).toFixed(1)}
-              </p>
-            </div>
-          </div>
-
-          {/* Most Watched Competitions */}
-          <div className={cardClass}>
-            <h2 className="text-lg font-semibold text-white mb-4">Most Watched Competitions</h2>
-            <CompetitionStatsTable competitions={competitions} />
+          {/* Overview — labels aligned on the same baseline, numbers aligned below */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
+            <OverviewCard label="Matches Watched" value={totalMatches} />
+            <OverviewCard label="Total Minutes" value={totalMinutesWatched.toLocaleString()} />
+            <OverviewCard label="Total Goals Seen" value={totalGoals} />
+            <OverviewCard label="Teams Watched" value={teams.length} />
+            <OverviewCard label="Players Watched" value={playerStats.length} />
+            <OverviewCard label="Competitions Watched" value={competitions.length} />
+            <OverviewCard label="Matches In Person" value={inPersonCount} />
           </div>
 
           {/* Most Watched Teams */}
-          <div className={cardClass}>
-            <h2 className="text-lg font-semibold text-white mb-4">Most Watched Teams</h2>
-            <TeamStatsTable teams={teams} />
+          <div className={sectionClass}>
+            <SectionHeader title="Most Watched Teams" href="/stats/teams" />
+            <TeamStatsTable teams={teams} pageSize={10} />
           </div>
 
           {/* Most Watched Players */}
           {playerStats.length > 0 && (
-            <div className={cardClass}>
-              <h2 className="text-lg font-semibold text-white mb-4">Most Watched Players</h2>
-              <PlayerStatsTable players={playerStats} />
+            <div className={sectionClass}>
+              <SectionHeader title="Most Watched Players" href="/stats/players" />
+              <PlayerStatsTable players={playerStats} pageSize={10} />
+            </div>
+          )}
+
+          {/* Most Watched Competitions */}
+          <div className={sectionClass}>
+            <SectionHeader title="Most Watched Competitions" href="/stats/competitions" />
+            <CompetitionStatsTable competitions={competitions} pageSize={10} />
+          </div>
+
+          {/* Most Watched Stadiums */}
+          {stadiumTotalRows.length > 0 && (
+            <div className={sectionClass}>
+              <SectionHeader title="Most Watched Stadiums" href="/stadiums" />
+              <StadiumStatsTable stadiums={stadiumTotalRows} pageSize={10} />
+            </div>
+          )}
+
+          {/* In-Person Stadiums */}
+          {stadiumInPersonRows.length > 0 && (
+            <div className={sectionClass}>
+              <SectionHeader title="Most Watched Stadiums (In Person)" href="/stadiums/in-person" />
+              <StadiumStatsTable stadiums={stadiumInPersonRows} pageSize={10} matchesLabel="Visits" />
+            </div>
+          )}
+
+          {/* In-Person Matches */}
+          {inPersonItems.length > 0 && (
+            <div className={sectionClass}>
+              <SectionHeader title="Matches Watched In Person" href="/stats/in-person" />
+              <PagedMatchList items={inPersonItems} pageSize={10} />
             </div>
           )}
         </div>

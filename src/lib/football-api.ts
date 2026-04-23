@@ -50,6 +50,8 @@ export interface MatchSearchResult {
   round: string;
   date: string;
   venue: string;
+  venueId: number | null;
+  venueCity: string | null;
   homeCrest: string;
   awayCrest: string;
 }
@@ -91,6 +93,8 @@ function toMatchResult(
     round: f.league.round,
     date: toLocalDate(f.fixture.date, timeZone),
     venue: f.fixture.venue.name ?? "",
+    venueId: f.fixture.venue.id ?? null,
+    venueCity: f.fixture.venue.city ?? null,
     homeCrest: f.teams.home.logo,
     awayCrest: f.teams.away.logo,
   };
@@ -313,6 +317,46 @@ export async function fetchTeamProfile(
   };
 }
 
+interface ApiFootballLeagueProfile {
+  league: {
+    id: number;
+    name: string;
+    logo: string | null;
+  };
+  country: {
+    name: string | null;
+    code: string | null;
+    flag: string | null;
+  };
+}
+
+export interface LeagueProfileResult {
+  id: number;
+  name: string;
+  logo: string | null;
+  country: string | null;
+  flag: string | null;
+}
+
+export async function fetchLeagueProfile(
+  leagueId: number
+): Promise<LeagueProfileResult | null> {
+  const res = await fetchApi(`/leagues?id=${leagueId}`);
+  if (!res.ok) {
+    throw new Error(`api-football error: leagues ${res.status}`);
+  }
+  const data: ApiFootballResponse<ApiFootballLeagueProfile> = await res.json();
+  const row = data.response?.[0];
+  if (!row) return null;
+  return {
+    id: row.league.id,
+    name: row.league.name,
+    logo: row.league.logo ?? null,
+    country: row.country?.name ?? null,
+    flag: row.country?.flag ?? null,
+  };
+}
+
 export async function fetchPlayerProfile(
   playerId: number
 ): Promise<PlayerProfileResult | null> {
@@ -324,14 +368,90 @@ export async function fetchPlayerProfile(
   const row = data.response?.[0];
   if (!row) return null;
   const p = row.player;
+  let resolvedName = expandAbbreviatedName(p.name, p.firstname, p.lastname);
+
+  // If we still have an abbreviation (firstname was the legal name, not the common name — e.g.
+  // Harry Maguire, whose firstname is "Jacob"), try the season-specific /players endpoint. It
+  // sometimes returns the common name where /players/profiles returns the display-abbreviated
+  // form. One extra request per mismatched player, paid once then cached.
+  if (looksAbbreviated(resolvedName)) {
+    try {
+      const fallbackName = await fetchPlayerNameFromSeason(playerId);
+      if (fallbackName && !looksAbbreviated(fallbackName)) {
+        resolvedName = fallbackName;
+      }
+    } catch {
+      // best-effort — stay on the abbreviation rather than failing the profile fetch
+    }
+  }
+
   return {
     id: p.id,
-    name: p.name,
+    name: resolvedName,
     nationality: p.nationality ?? null,
     photo: p.photo ?? null,
     position: p.position ?? null,
     shirtNumber: p.number ?? null,
   };
+}
+
+function looksAbbreviated(name: string): boolean {
+  return /^[A-Z]\.(?:[-.]?[A-Z]\.)*\s/.test(name.trim());
+}
+
+interface ApiFootballPlayerSeasonRow {
+  player: { id: number; name: string };
+  statistics?: Array<{ league?: { season?: number } }>;
+}
+
+// Walks back from the current season through the prior one until we find a response. Different
+// seasons are stored separately in the API — trying only the current year would miss retired
+// or recently-transferred players. Capped at 2 seasons to bound the worst-case API cost.
+async function fetchPlayerNameFromSeason(playerId: number): Promise<string | null> {
+  const currentYear = new Date().getFullYear();
+  const candidateSeasons = [currentYear, currentYear - 1];
+  for (const season of candidateSeasons) {
+    const res = await fetchApi(`/players?id=${playerId}&season=${season}`);
+    if (!res.ok) continue;
+    const data: ApiFootballResponse<ApiFootballPlayerSeasonRow> = await res.json();
+    const row = data.response?.[0];
+    const name = row?.player?.name;
+    if (name) return name;
+  }
+  return null;
+}
+
+// Keep the commonly-used name ("Pedri", "Rodri", "Vinicius Junior") when it's already spelled
+// out. When `name` is abbreviated ("L. Shaw"), try to expand using `firstname` — but ONLY if
+// the initial in `name` matches the first letter of `firstname`. Players like Harry Maguire
+// (legal firstname "Jacob", goes by middle name "Harry") produce "H. Maguire" from the API
+// but `firstname` = "Jacob", so expanding blindly would write "Jacob Maguire". In that case
+// keep the abbreviation — a short-but-correct name beats a wrong full name.
+// We deliberately don't concatenate `firstname + lastname` because `lastname` is often the
+// legal full surname (Luke Shaw → "Paul Hoare Shaw"), which isn't how the player is known.
+export function expandAbbreviatedName(
+  name: string,
+  firstname: string | null,
+  lastname: string | null
+): string {
+  const trimmed = (name ?? "").trim();
+  const m = trimmed.match(/^([A-Z])\.(?:[-.]?[A-Z]\.)*\s+(.+)$/);
+  if (!m) return trimmed;
+  const initial = m[1];
+  const surname = m[2];
+
+  // Scan every word in firstname (which often carries all given names, e.g. Harry Maguire's
+  // firstname is "Jacob Harry") for one starting with the abbreviation's initial. This catches
+  // players who go by their middle name — the given-name list contains both "Jacob" and
+  // "Harry", and we want the word that matches "H.".
+  const firstWords = (firstname ?? "").trim().split(/\s+/).filter(Boolean);
+  const matching = firstWords.find((w) => w.charAt(0).toUpperCase() === initial);
+  if (matching) return `${matching} ${surname}`;
+
+  // Mismatch: no firstname word starts with the initial. Keep the abbreviation — the caller
+  // can try a secondary endpoint (e.g. /players?id=X&season=Y) if it wants to try harder.
+  void lastname;
+  return trimmed;
 }
 
 interface ApiFootballTransferTeam {

@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { getTeamProfile, getTeamPlayers } from "@/lib/team-stats";
 import { enrichPlayerStatsWithNationality } from "@/lib/player-stats";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
+import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
+import SectionHeader from "@/components/SectionHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -61,50 +63,33 @@ export default async function TeamPage({
 
       {teamPlayers.length > 0 && (
         <div className={cardClass}>
-          <h2 className="text-lg font-semibold text-white mb-4">Most Watched Players</h2>
-          <PlayerStatsTable players={teamPlayers} />
+          <SectionHeader title="Most Watched Players" seeAllHref={`/teams/${idNum}/players`} />
+          <PlayerStatsTable players={teamPlayers} pageSize={10} />
         </div>
       )}
 
       <div className={cardClass}>
-        <h2 className="text-lg font-semibold text-white mb-4">Matches Watched</h2>
-        <div className="space-y-2">
-          {team.appearances.map((a) => {
-            const myGoals = a.isHome ? a.homeScore : a.awayScore;
-            const theirGoals = a.isHome ? a.awayScore : a.homeScore;
-            const resultColor =
-              myGoals > theirGoals ? "text-accent" : myGoals < theirGoals ? "text-red-400" : "text-slate-300";
-            const resultLetter = myGoals > theirGoals ? "W" : myGoals < theirGoals ? "L" : "D";
-            return (
-              <Link
-                key={a.matchId}
-                href={`/matches/${a.matchId}`}
-                className="flex items-center gap-3 text-sm hover:bg-surface rounded-lg px-2 py-2 transition-colors"
-              >
-                <span className={`w-5 text-center font-bold ${resultColor}`}>{resultLetter}</span>
-                <div className="flex-1 min-w-0 flex items-center gap-2">
-                  {a.homeCrest && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.homeCrest} alt={a.homeTeam} className="w-4 h-4 object-contain" />
-                  )}
-                  <span className="truncate text-slate-200">{a.homeTeam}</span>
-                  <span className="text-muted tabular-nums px-1">
-                    {a.homeScore} - {a.awayScore}
-                  </span>
-                  <span className="truncate text-slate-200">{a.awayTeam}</span>
-                  {a.awayCrest && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.awayCrest} alt={a.awayTeam} className="w-4 h-4 object-contain" />
-                  )}
-                </div>
-                <span className="text-xs text-muted shrink-0">{a.minutesWatched} min</span>
-                <span className="text-xs text-muted shrink-0 tabular-nums">
-                  {new Date(a.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                </span>
-              </Link>
-            );
-          })}
-        </div>
+        <SectionHeader title="Matches Watched" seeAllHref={`/teams/${idNum}/matches`} />
+        <PagedMatchList
+          items={team.appearances.map<PagedMatchItem>((a) => ({
+            match: {
+              matchId: a.matchId,
+              date: a.date,
+              homeTeam: a.homeTeam,
+              homeTeamId: a.homeTeamId,
+              homeCrest: a.homeCrest,
+              homeScore: a.homeScore,
+              awayTeam: a.awayTeam,
+              awayTeamId: a.awayTeamId,
+              awayCrest: a.awayCrest,
+              awayScore: a.awayScore,
+              minutesWatched: a.minutesWatched,
+              watchedInPerson: a.watchedInPerson,
+            },
+            perspective: { kind: "team", teamId: idNum },
+          }))}
+          pageSize={10}
+        />
       </div>
     </div>
   );

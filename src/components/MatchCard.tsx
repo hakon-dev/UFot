@@ -56,53 +56,79 @@ export default function MatchCard({ match }: { match: Match }) {
     day: "numeric",
   });
 
+  // The card is split into a main Link covering the score/teams area and sibling Links for the
+  // competition badge — nesting <a> inside <a> is invalid HTML, so the outer wrapper is a div.
   return (
-    <Link
-      href={`/matches/${match.id}`}
-      className="block bg-card rounded-xl p-5 border border-card-border hover:border-card-hover transition-colors group"
-    >
+    <div className="block bg-card rounded-xl p-5 border border-card-border hover:border-card-hover transition-colors group">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 space-y-3">
-          {/* Descriptive text */}
-          <p className="text-muted text-sm">
-            You watched {minutes < 90 ? `${minutes} min` : ""} on <span className="text-slate-300">{dateStr}</span>
-            {minutes < 90 && (
-              <span className="ml-2 inline-flex items-center bg-accent-muted text-accent-dim px-1.5 py-0.5 rounded text-xs tabular-nums">
-                {minutes}&apos;
-              </span>
-            )}
-          </p>
+          <Link href={`/matches/${match.id}`} className="block space-y-3">
+            {/* Descriptive text */}
+            <p className="text-muted text-sm">
+              You watched {minutes < 90 ? `${minutes} min` : ""} on <span className="text-slate-300">{dateStr}</span>
+              {minutes < 90 && (
+                <span className="ml-2 inline-flex items-center bg-accent-muted text-accent-dim px-1.5 py-0.5 rounded text-xs tabular-nums">
+                  {minutes}&apos;
+                </span>
+              )}
+            </p>
 
-          {/* Teams with crests and score */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2.5 flex-1 min-w-0">
-              <TeamCrest src={match.home_crest} alt={match.home_team} />
-              <span className={`font-semibold text-lg truncate ${match.home_score > match.away_score ? "text-accent" : "text-slate-200"}`}>
-                {match.home_team}
-              </span>
-            </div>
+            {/* Teams with crests and score */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                <TeamCrest src={match.home_crest} alt={match.home_team} />
+                <span className={`font-semibold text-lg truncate ${match.home_score > match.away_score ? "text-accent" : "text-slate-200"}`}>
+                  {match.home_team}
+                </span>
+              </div>
 
-            <div className="text-2xl font-bold text-white tabular-nums shrink-0 px-2">
-              {match.home_score} - {match.away_score}
-            </div>
+              <div className="text-2xl font-bold text-white tabular-nums shrink-0 px-2">
+                {match.home_score} - {match.away_score}
+              </div>
 
-            <div className="flex items-center gap-2.5 flex-1 min-w-0 justify-end">
-              <span className={`font-semibold text-lg truncate text-right ${match.away_score > match.home_score ? "text-accent" : "text-slate-200"}`}>
-                {match.away_team}
-              </span>
-              <TeamCrest src={match.away_crest} alt={match.away_team} />
+              <div className="flex items-center gap-2.5 flex-1 min-w-0 justify-end">
+                <span className={`font-semibold text-lg truncate text-right ${match.away_score > match.home_score ? "text-accent" : "text-slate-200"}`}>
+                  {match.away_team}
+                </span>
+                <TeamCrest src={match.away_crest} alt={match.away_team} />
+              </div>
             </div>
-          </div>
+          </Link>
 
           {/* Metadata */}
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
             {match.competition && (
-              <span className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full">
-                {match.competition}
-              </span>
+              match.competition_id != null ? (
+                <Link
+                  href={`/competitions/${match.competition_id}`}
+                  className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full hover:text-accent transition-colors"
+                >
+                  {match.competition}
+                </Link>
+              ) : (
+                <span className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full">
+                  {match.competition}
+                </span>
+              )
             )}
             {match.round && <span>{match.round}</span>}
-            {match.venue && <span>{match.venue}</span>}
+            {match.venue && (
+              match.venue_id != null ? (
+                <Link
+                  href={`/stadiums/${match.venue_id}`}
+                  className="hover:text-accent transition-colors"
+                >
+                  {match.venue}
+                </Link>
+              ) : (
+                <span>{match.venue}</span>
+              )
+            )}
+            {match.watched_in_person === 1 && (
+              <span className="uppercase tracking-wide text-[10px] font-semibold px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+                In person
+              </span>
+            )}
           </div>
         </div>
 
@@ -116,6 +142,6 @@ export default function MatchCard({ match }: { match: Match }) {
           </svg>
         </button>
       </div>
-    </Link>
+    </div>
   );
 }

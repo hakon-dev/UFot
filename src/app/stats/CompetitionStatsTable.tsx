@@ -1,62 +1,73 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
+import { HeaderButton, Pagination, usePagedRows, type SortDir } from "./_components/TableUtils";
+
+// Keep in sync with REGION_NAMES in src/lib/competition-stats.ts. Duplicated here (rather than
+// imported) because competition-stats.ts pulls in db.ts and this is a client component.
+const REGION_NAMES = new Set([
+  "World",
+  "Europe",
+  "Africa",
+  "Asia",
+  "South America",
+  "North America",
+  "Oceania",
+]);
+
+function isRegionName(name: string | null | undefined): boolean {
+  return !!name && REGION_NAMES.has(name);
+}
+
+function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a14 14 0 0 1 0 18" />
+      <path d="M12 3a14 14 0 0 0 0 18" />
+    </svg>
+  );
+}
 
 export interface CompetitionStat {
+  competitionId: number | null;
   competition: string;
+  logo: string | null;
+  country: string | null;
+  countryCode: string | null;
   matches: number;
   minutes: number;
 }
 
-type SortKey = "competition" | "matches" | "minutes";
-type SortDir = "asc" | "desc";
+type SortKey = "competition" | "country" | "minutes" | "matches";
 
-const NUMERIC_KEYS: SortKey[] = ["matches", "minutes"];
-
-function SortArrow({ dir }: { dir: SortDir }) {
-  return <span className="ml-1 text-[10px] text-accent">{dir === "asc" ? "▲" : "▼"}</span>;
-}
-
-function HeaderButton({
-  label,
-  sortKey,
-  currentKey,
-  currentDir,
-  onSort,
-  align,
-}: {
-  label: string;
-  sortKey: SortKey;
-  currentKey: SortKey;
-  currentDir: SortDir;
-  onSort: (key: SortKey) => void;
-  align: "left" | "center";
-}) {
-  const isActive = currentKey === sortKey;
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(sortKey)}
-      className={`inline-flex items-center ${
-        align === "center" ? "justify-center" : "justify-start"
-      } gap-0.5 font-medium hover:text-accent transition-colors w-full`}
-    >
-      {label}
-      {isActive && <SortArrow dir={currentDir} />}
-    </button>
-  );
-}
+const NUMERIC_KEYS: SortKey[] = ["minutes", "matches"];
 
 function compare(a: CompetitionStat, b: CompetitionStat, key: SortKey, dir: SortDir): number {
   const mult = dir === "asc" ? 1 : -1;
   if (NUMERIC_KEYS.includes(key)) {
     return ((a[key] as number) - (b[key] as number)) * mult;
   }
-  return a.competition.localeCompare(b.competition) * mult;
+  const av = key === "competition" ? a.competition : a.country;
+  const bv = key === "competition" ? b.competition : b.country;
+  const aEmpty = !av;
+  const bEmpty = !bv;
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+  return av!.localeCompare(bv!) * mult;
 }
 
-export default function CompetitionStatsTable({ competitions }: { competitions: CompetitionStat[] }) {
-  const [sortKey, setSortKey] = useState<SortKey>("matches");
+export default function CompetitionStatsTable({
+  competitions,
+  pageSize = 10,
+}: {
+  competitions: CompetitionStat[];
+  pageSize?: number | null;
+}) {
+  const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const handleSort = (key: SortKey) => {
@@ -73,37 +84,111 @@ export default function CompetitionStatsTable({ competitions }: { competitions: 
     [competitions, sortKey, sortDir]
   );
 
+  const { page, setPage, pageCount, visible } = usePagedRows(sorted, pageSize);
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-muted border-b border-card-border">
-            <th className="text-left pb-3">
-              <HeaderButton label="Competition" sortKey="competition" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
-            </th>
-            <th className="text-center pb-3">
-              <HeaderButton label="Matches" sortKey="matches" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
-            </th>
-            <th className="text-center pb-3">
-              <HeaderButton label="Minutes" sortKey="minutes" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((c) => (
-            <tr key={c.competition} className="border-b border-card-border/50">
-              <td className="py-2.5 text-slate-200 font-medium">{c.competition}</td>
-              <td className="py-2.5 text-center text-slate-300 tabular-nums">{c.matches}</td>
-              <td className="py-2.5 text-center text-accent tabular-nums">{c.minutes.toLocaleString()}</td>
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col />
+            <col className="w-44" />
+            <col className="w-28" />
+            <col className="w-24" />
+          </colgroup>
+          <thead>
+            <tr className="text-muted border-b border-card-border">
+              <th className="text-left pb-3">
+                <HeaderButton label="Competition" sortKey="competition" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
+              </th>
+              <th className="text-left pb-3">
+                <HeaderButton label="Country" sortKey="country" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
+              </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="Minutes" sortKey="minutes" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
+              <th className="text-center pb-3">
+                <HeaderButton label="Matches" sortKey="matches" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="center" />
+              </th>
             </tr>
-          ))}
-          {sorted.length === 0 && (
-            <tr>
-              <td colSpan={3} className="py-6 text-center text-muted">No competitions yet.</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {visible.map((c) => {
+              const cellInner = (
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {c.logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.logo} alt="" className="w-5 h-5 object-contain shrink-0" />
+                  ) : (
+                    <div className="w-5 h-5 shrink-0" />
+                  )}
+                  <span className="truncate">{c.competition}</span>
+                </div>
+              );
+              return (
+              <tr key={c.competitionId ?? c.competition} className="border-b border-card-border/50">
+                <td className="py-2.5 text-slate-200 font-medium">
+                  {c.competitionId != null ? (
+                    <Link href={`/competitions/${c.competitionId}`} className="hover:text-accent transition-colors block max-w-full">
+                      {cellInner}
+                    </Link>
+                  ) : (
+                    cellInner
+                  )}
+                </td>
+                <td className="py-2.5 text-slate-300">
+                  {c.country ? (
+                    isRegionName(c.country) ? (
+                      <div className="flex items-center gap-2 min-w-0">
+                        {c.countryCode ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={`https://flagcdn.com/${c.countryCode}.svg`}
+                            alt={c.country}
+                            className="w-5 h-3.5 object-cover rounded-sm ring-1 ring-card-border shrink-0"
+                          />
+                        ) : (
+                          <GlobeIcon className="w-5 h-3.5 text-muted shrink-0" />
+                        )}
+                        <span className="truncate">{c.country}</span>
+                      </div>
+                    ) : c.countryCode ? (
+                      <Link
+                        href={`/countries/${c.countryCode}`}
+                        className="flex items-center gap-2 min-w-0 hover:text-accent transition-colors"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`https://flagcdn.com/${c.countryCode}.svg`}
+                          alt={c.country}
+                          className="w-5 h-3.5 object-cover rounded-sm ring-1 ring-card-border shrink-0"
+                        />
+                        <span className="truncate">{c.country}</span>
+                      </Link>
+                    ) : (
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-5 h-3.5 shrink-0" />
+                        <span className="truncate">{c.country}</span>
+                      </div>
+                    )
+                  ) : (
+                    <span className="text-muted">-</span>
+                  )}
+                </td>
+                <td className="py-2.5 text-center text-accent tabular-nums">{c.minutes.toLocaleString()}</td>
+                <td className="py-2.5 text-center text-slate-300 tabular-nums">{c.matches}</td>
+              </tr>
+              );
+            })}
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={4} className="py-6 text-center text-muted">No competitions yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination page={page} pageCount={pageCount} setPage={setPage} />
+    </>
   );
 }

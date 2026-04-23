@@ -19,6 +19,8 @@ interface MatchSearchResult {
   round: string;
   date: string;
   venue: string;
+  venueId: number | null;
+  venueCity: string | null;
   homeCrest: string;
   awayCrest: string;
 }
@@ -42,6 +44,7 @@ export default function FixturePreviewPage() {
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [intervals, setIntervals] = useState<number[][]>([[0, 90]]);
+  const [watchedInPerson, setWatchedInPerson] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -96,13 +99,17 @@ export default function FixturePreviewPage() {
           round: summary.round,
           date: summary.date,
           venue: summary.venue,
+          venueId: summary.venueId ?? undefined,
+          venueCity: summary.venueCity ?? undefined,
           homeCrest: summary.homeCrest,
           awayCrest: summary.awayCrest,
           externalMatchId: summary.id,
           externalSource: "api-football",
           homeTeamId: summary.homeTeamId,
           awayTeamId: summary.awayTeamId,
+          competitionId: summary.competitionCode ? Number(summary.competitionCode) : undefined,
           watchIntervals: intervals,
+          watchedInPerson,
         }),
       });
       if (!res.ok) {
@@ -202,6 +209,19 @@ export default function FixturePreviewPage() {
         </p>
 
         <WatchIntervalEditor intervals={intervals} onChange={setIntervals} />
+
+        <label className="flex items-center gap-2.5 mt-4 text-sm text-slate-200 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={watchedInPerson}
+            onChange={(e) => setWatchedInPerson(e.target.checked)}
+            className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+          />
+          Watched in person at the stadium
+          {summary.venue ? (
+            <span className="text-muted text-xs">({summary.venue})</span>
+          ) : null}
+        </label>
 
         {saveError && (
           <p className="text-sm text-red-400 mt-3">{saveError}</p>

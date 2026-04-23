@@ -26,6 +26,10 @@ export async function POST(request: NextRequest) {
     watchIntervals: body.watchIntervals || undefined,
     homeTeamId: body.homeTeamId || undefined,
     awayTeamId: body.awayTeamId || undefined,
+    competitionId: body.competitionId || undefined,
+    venueId: body.venueId || undefined,
+    venueCity: body.venueCity || undefined,
+    watchedInPerson: body.watchedInPerson === true,
   });
 
   // Eager-fetch details so stats/player/team aggregations see this match immediately —

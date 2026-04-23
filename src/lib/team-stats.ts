@@ -9,13 +9,17 @@ export interface TeamMatchAppearance {
   date: string;
   homeTeam: string;
   awayTeam: string;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
   homeScore: number;
   awayScore: number;
   homeCrest: string | null;
   awayCrest: string | null;
   competition: string | null;
+  competitionId: number | null;
   isHome: boolean;
   minutesWatched: number;
+  watchedInPerson: boolean;
 }
 
 export interface TeamProfile {
@@ -75,13 +79,17 @@ export function getTeamProfile(teamId: number): TeamProfile | null {
       date: m.date,
       homeTeam: m.home_team,
       awayTeam: m.away_team,
+      homeTeamId: m.home_team_id,
+      awayTeamId: m.away_team_id,
       homeScore: m.home_score,
       awayScore: m.away_score,
       homeCrest: m.home_crest,
       awayCrest: m.away_crest,
       competition: m.competition,
+      competitionId: m.competition_id,
       isHome,
       minutesWatched,
+      watchedInPerson: m.watched_in_person === 1,
     });
   }
 
