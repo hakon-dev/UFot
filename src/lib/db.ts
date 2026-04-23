@@ -252,6 +252,11 @@ db.exec(`
 //   v6 — `expandAbbreviatedName` now scans ALL words in firstname (which may contain multiple
 //        given names like "Jacob Harry" for Harry Maguire) rather than just the first word.
 //        Wipe the players cache so mismatched entries re-run through the new scan.
+//   v7 — the `national` column was added by ALTER TABLE, leaving pre-existing rows with
+//        `national = NULL`. `nationalTeamIds()` only returns `national = 1`, so those stale
+//        rows were treated as non-national and national teams slipped into the Most Watched
+//        Players "club" column. Delete them so the next enrichment pass re-fetches with the
+//        flag set correctly.
 const userVersion = db.pragma("user_version", { simple: true }) as number;
 if (userVersion < 2) {
   db.exec(`
@@ -268,6 +273,10 @@ if (userVersion < 2) {
 if (userVersion < 6) {
   db.exec(`DELETE FROM players`);
   db.pragma("user_version = 6");
+}
+if (userVersion < 7) {
+  db.exec(`DELETE FROM teams WHERE national IS NULL`);
+  db.pragma("user_version = 7");
 }
 
 // NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null

@@ -448,8 +448,10 @@ export async function enrichPlayerStatsWithNationality(
   );
 }
 
-// Populate the teams cache for any of `teamIds` not already cached. Bounded so a single call
-// can't exhaust the daily API budget.
+// Populate the teams cache for any of `teamIds` not already cached, and re-fetch rows where
+// `national` is still NULL — those came from a pre-`national`-column cache load and would
+// otherwise be treated as non-national forever. Bounded so a single call can't exhaust the
+// daily API budget.
 async function ensureTeamsClassified(
   teamIds: number[],
   maxFetches: number
@@ -457,7 +459,12 @@ async function ensureTeamsClassified(
   if (teamIds.length === 0) return;
   const unique = [...new Set(teamIds)];
   const cached = getTeams(unique);
-  const toFetch = unique.filter((id) => !cached.has(id)).slice(0, maxFetches);
+  const toFetch = unique
+    .filter((id) => {
+      const rec = cached.get(id);
+      return !rec || rec.national == null;
+    })
+    .slice(0, maxFetches);
   if (toFetch.length === 0) return;
   await Promise.all(
     toFetch.map(async (id) => {
@@ -501,6 +508,16 @@ export async function enrichPlayerStatsWithClub(
     currentClubIds.length > 0 ? nationalTeamIds([...new Set(currentClubIds)]) : new Set<number>();
   for (const s of stats) {
     if (s.clubId != null && flaggedNational.has(s.clubId)) {
+      s.club = null;
+      s.clubId = null;
+      s.clubCrest = null;
+      continue;
+    }
+    // Safety net for manual-entry matches with no team_id: if the club name equals the
+    // player's nationality, it is almost certainly the national team being mis-assigned.
+    // Clear it so the transfer backfill below can fill in a real club (when we have a
+    // playerId), or at minimum so the column renders blank instead of "Norway".
+    if (s.club && s.nationality && s.club === s.nationality) {
       s.club = null;
       s.clubId = null;
       s.clubCrest = null;

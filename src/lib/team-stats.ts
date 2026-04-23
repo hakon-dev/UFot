@@ -136,8 +136,14 @@ export async function enrichTeamRecordsWithCountry<T extends TeamCountryRecord>(
     }
   }
 
+  // Re-fetch rows where `national` is still NULL — they came from a cache populated before
+  // the `national` column existed, and would otherwise stay mis-classified forever.
   const toFetch = records
-    .filter((r) => r.teamId != null && !cached.has(r.teamId))
+    .filter((r) => {
+      if (r.teamId == null) return false;
+      const rec = cached.get(r.teamId);
+      return !rec || rec.national == null;
+    })
     .slice(0, maxFetches);
 
   await Promise.all(
