@@ -84,11 +84,19 @@ export default function WatchedMatchRow({
   return (
     <div
       className={`
-        grid items-center gap-x-3 text-sm px-2 py-2.5 transition-colors
+        group relative grid items-center gap-x-3 text-sm px-2 py-2.5 transition-colors
         hover:bg-surface
         ${gridCols}
       `}
     >
+      {/* Whole-row click target — siblings (not children) so nested <a> is avoided.
+          Team-name <Link>s get `relative` so they stack above this overlay. */}
+      <Link
+        href={`/matches/${match.matchId}`}
+        aria-label={`${match.homeTeam} ${match.homeScore}–${match.awayScore} ${match.awayTeam}`}
+        className="absolute inset-0 rounded-md"
+      />
+
       {/* Result */}
       <span className={`text-center font-bold tabular-nums ${resultColor}`}>
         {resultLetter ?? "–"}
@@ -114,21 +122,20 @@ export default function WatchedMatchRow({
         )}
       </div>
 
-      {/* Score — centered, bolder */}
-      <Link
-        href={`/matches/${match.matchId}`}
+      {/* Score — centered, bolder. Visual only; row overlay handles the click. */}
+      <span
         className="
           shrink-0 inline-flex items-center justify-center gap-1
           min-w-[3.75rem] px-2 py-0.5 rounded-md
           bg-card border border-card-border
           text-slate-100 font-semibold tabular-nums
-          hover:text-accent hover:border-accent/40 transition-colors
+          transition-colors group-hover:text-accent group-hover:border-accent/40
         "
       >
         <span>{match.homeScore}</span>
         <span className="text-muted font-normal">–</span>
         <span>{match.awayScore}</span>
-      </Link>
+      </span>
 
       {/* Away team — left aligned so the crest sits next to the score */}
       <div className="flex items-center gap-2 min-w-0">
@@ -177,17 +184,14 @@ export default function WatchedMatchRow({
         ) : null}
       </div>
 
-      {/* Date */}
-      <Link
-        href={`/matches/${match.matchId}`}
-        className="text-xs text-muted tabular-nums text-right hover:text-accent transition-colors whitespace-nowrap"
-      >
+      {/* Date — visual only; row overlay handles the click. */}
+      <span className="text-xs text-muted tabular-nums text-right whitespace-nowrap transition-colors group-hover:text-accent">
         {new Date(match.date).toLocaleDateString("en-GB", {
           day: "2-digit",
           month: "short",
           year: "2-digit",
         })}
-      </Link>
+      </span>
     </div>
   );
 }
@@ -272,10 +276,11 @@ function TeamNameLink({
   const color = highlight ? "text-accent" : "text-slate-200";
   const alignCls = align === "right" ? "text-right" : "text-left";
   if (teamId != null) {
+    // `relative` so this link stacks above the whole-row overlay link and keeps receiving clicks.
     return (
       <Link
         href={`/teams/${teamId}`}
-        className={`truncate ${color} ${weight} ${alignCls} hover:text-accent transition-colors`}
+        className={`relative truncate ${color} ${weight} ${alignCls} hover:text-accent transition-colors`}
       >
         {name}
       </Link>

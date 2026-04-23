@@ -65,12 +65,10 @@ export default function MatchCard({ match }: { match: Match }) {
           <Link href={`/matches/${match.id}`} className="block space-y-3">
             {/* Descriptive text */}
             <p className="text-muted text-sm">
-              You watched {minutes < 90 ? `${minutes} min` : ""} on <span className="text-slate-300">{dateStr}</span>
-              {minutes < 90 && (
-                <span className="ml-2 inline-flex items-center bg-accent-muted text-accent-dim px-1.5 py-0.5 rounded text-xs tabular-nums">
-                  {minutes}&apos;
-                </span>
-              )}
+              {minutes >= 90 ? "You watched the full match" : `You watched ${minutes} min`} on <span className="text-slate-300">{dateStr}</span>
+              <span className="ml-2 inline-flex items-center bg-accent-muted text-accent-dim px-1.5 py-0.5 rounded text-xs tabular-nums">
+                {minutes}&apos;
+              </span>
             </p>
 
             {/* Teams with crests and score */}

@@ -154,7 +154,7 @@ export default function MatchDetailClient({
   const [watchedInPerson, setWatchedInPerson] = useState(initialWatchedInPerson);
   const [stadiumSaving, setStadiumSaving] = useState(false);
 
-  async function toggleWatchedInPerson(next: boolean) {
+  async function saveWatchedInPerson(next: boolean) {
     setWatchedInPerson(next);
     setStadiumSaving(true);
     try {
@@ -166,6 +166,18 @@ export default function MatchDetailClient({
     } finally {
       setStadiumSaving(false);
     }
+  }
+
+  function handleWatchedInPersonClick(e: React.MouseEvent<HTMLInputElement>) {
+    const next = !watchedInPerson;
+    const message = next
+      ? "Mark this match as watched in person at the stadium?"
+      : "Remove the in-person stadium mark from this match?";
+    if (!confirm(message)) {
+      e.preventDefault();
+      return;
+    }
+    saveWatchedInPerson(next);
   }
 
   useEffect(() => {
@@ -296,7 +308,8 @@ export default function MatchDetailClient({
           <input
             type="checkbox"
             checked={watchedInPerson}
-            onChange={(e) => toggleWatchedInPerson(e.target.checked)}
+            onChange={() => {}}
+            onClick={handleWatchedInPersonClick}
             disabled={stadiumSaving}
             className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
           />
