@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompetition, getMatchesWithDetails } from "@/lib/db";
-import { computePlayerStats, enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { isRegionName, resolveCompetitionRegion } from "@/lib/competition-stats";
 import { aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
@@ -50,6 +50,7 @@ export default async function CompetitionPage({
 
   const players = computePlayerStats(matches);
   await enrichPlayerStatsWithNationality(players);
+  await enrichPlayerStatsWithClub(players);
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
   const sectionClass = "bg-card rounded-xl p-6 border border-card-border";

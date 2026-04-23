@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTeamProfile, getTeamPlayers } from "@/lib/team-stats";
-import { enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +19,7 @@ export default async function TeamPlayersPage({
 
   const players = getTeamPlayers(idNum);
   await enrichPlayerStatsWithNationality(players);
+  await enrichPlayerStatsWithClub(players);
 
   return (
     <div className="space-y-6">

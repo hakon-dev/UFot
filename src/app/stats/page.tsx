@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getAllMatches, getMatchesWithDetails, getStadiumAggregates } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
-import { computePlayerStats, enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
 import { aggregateCompetitions, aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
@@ -69,14 +69,19 @@ export default async function StatsPage() {
     }));
 
   const matchesWithDetails = getMatchesWithDetails();
+
+  // Enrich teams first so national-team flags are populated in the teams cache before
+  // computePlayerStats runs — otherwise `recordClub`'s national skip can miss uncached teams
+  // and a national team ends up as a player's "club".
+  const teams = aggregateTeams(matches);
+  await enrichTeamRecordsWithCountry(teams);
+
   const playerStats = computePlayerStats(matchesWithDetails);
   await enrichPlayerStatsWithNationality(playerStats);
+  await enrichPlayerStatsWithClub(playerStats);
 
   const competitions = aggregateCompetitions(matches);
   await enrichCompetitionRecordsWithDetails(competitions);
-
-  const teams = aggregateTeams(matches);
-  await enrichTeamRecordsWithCountry(teams);
 
   const inPersonItems: PagedMatchItem[] = matches
     .filter((m) => m.watched_in_person === 1)

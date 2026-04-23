@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompetition, getMatchesWithDetails } from "@/lib/db";
-import { computePlayerStats, enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,7 @@ export default async function CompetitionPlayersPage({
 
   const players = computePlayerStats(matches);
   await enrichPlayerStatsWithNationality(players);
+  await enrichPlayerStatsWithClub(players);
 
   return (
     <div className="space-y-6">

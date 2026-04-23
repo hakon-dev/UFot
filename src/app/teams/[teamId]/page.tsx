@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTeamProfile, getTeamPlayers } from "@/lib/team-stats";
-import { enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
@@ -21,6 +21,7 @@ export default async function TeamPage({
 
   const teamPlayers = getTeamPlayers(idNum);
   await enrichPlayerStatsWithNationality(teamPlayers);
+  await enrichPlayerStatsWithClub(teamPlayers);
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
 

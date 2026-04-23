@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getMatchesWithDetails } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
-import { computePlayerStats, enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import PlayerStatsTable from "../PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +12,7 @@ export default async function AllPlayersStatsPage() {
   const matchesWithDetails = getMatchesWithDetails();
   const playerStats = computePlayerStats(matchesWithDetails);
   await enrichPlayerStatsWithNationality(playerStats);
+  await enrichPlayerStatsWithClub(playerStats);
 
   return (
     <div>

@@ -2,10 +2,10 @@ import type { Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard, Playe
 import {
   getMatchesWithDetails, getPlayers, getAllCachedPlayers, upsertPlayer,
   getPlayerTransfers, replacePlayerTransfers, hasFetchedPlayerTransfers,
-  nationalTeamIds,
+  nationalTeamIds, getTeams, upsertTeam, fetchedPlayerTransferIds,
 } from "./db";
 import { countryNameToCode } from "./country-codes";
-import { fetchPlayerProfile, fetchPlayerTransfers } from "./football-api";
+import { fetchPlayerProfile, fetchPlayerTransfers, fetchTeamProfile } from "./football-api";
 
 export interface PlayerStat {
   playerId: number | null;
@@ -446,6 +446,128 @@ export async function enrichPlayerStatsWithNationality(
       }
     })
   );
+}
+
+// Populate the teams cache for any of `teamIds` not already cached. Bounded so a single call
+// can't exhaust the daily API budget.
+async function ensureTeamsClassified(
+  teamIds: number[],
+  maxFetches: number
+): Promise<void> {
+  if (teamIds.length === 0) return;
+  const unique = [...new Set(teamIds)];
+  const cached = getTeams(unique);
+  const toFetch = unique.filter((id) => !cached.has(id)).slice(0, maxFetches);
+  if (toFetch.length === 0) return;
+  await Promise.all(
+    toFetch.map(async (id) => {
+      try {
+        const profile = await fetchTeamProfile(id);
+        if (!profile) return;
+        upsertTeam({
+          id: profile.id,
+          name: profile.name,
+          country: profile.country,
+          countryCode: countryNameToCode(profile.country),
+          logo: profile.logo,
+          national: profile.national,
+        });
+      } catch {
+        // best-effort
+      }
+    })
+  );
+}
+
+// A national team is never a club. `computePlayerStats` already skips national-team sides in
+// `recordClub`, but only when the team is cached with `national=1` at that moment. On a fresh
+// cache (or when stats are computed before team enrichment has run) a national team can still
+// land in the `club` column. This helper re-verifies after the fact, and for every player with
+// no real club (because their only watched appearances were for a national team) it pulls the
+// most-recent non-national destination from their transfer history — fetching `/transfers?player=X`
+// once per player, bounded by budget.
+export async function enrichPlayerStatsWithClub(
+  stats: PlayerStat[],
+  options: { maxTeamFetches?: number; maxTransferFetches?: number } = {}
+): Promise<void> {
+  const maxTeamFetches = options.maxTeamFetches ?? 10;
+  const maxTransferFetches = options.maxTransferFetches ?? 15;
+
+  const currentClubIds = stats
+    .map((s) => s.clubId)
+    .filter((id): id is number => id != null);
+  await ensureTeamsClassified(currentClubIds, maxTeamFetches);
+  const flaggedNational =
+    currentClubIds.length > 0 ? nationalTeamIds([...new Set(currentClubIds)]) : new Set<number>();
+  for (const s of stats) {
+    if (s.clubId != null && flaggedNational.has(s.clubId)) {
+      s.club = null;
+      s.clubId = null;
+      s.clubCrest = null;
+    }
+  }
+
+  const needsClub = stats.filter((s) => s.playerId != null && s.clubId == null);
+  if (needsClub.length === 0) return;
+
+  const needsClubIds = needsClub.map((s) => s.playerId as number);
+  const alreadyFetched = fetchedPlayerTransferIds(needsClubIds);
+  const toFetchTransfers = needsClubIds
+    .filter((id) => !alreadyFetched.has(id))
+    .slice(0, maxTransferFetches);
+
+  await Promise.all(
+    toFetchTransfers.map(async (id) => {
+      try {
+        const transfers = await fetchPlayerTransfers(id);
+        replacePlayerTransfers(
+          id,
+          transfers.map((t) => ({
+            transferDate: t.date,
+            type: t.type,
+            teamInId: t.teamIn.id,
+            teamInName: t.teamIn.name,
+            teamInLogo: t.teamIn.logo,
+            teamOutId: t.teamOut.id,
+            teamOutName: t.teamOut.name,
+            teamOutLogo: t.teamOut.logo,
+          }))
+        );
+      } catch {
+        // best-effort
+      }
+    })
+  );
+
+  const perPlayerRows = new Map<number, PlayerTransferRecord[]>();
+  const destinationTeamIds = new Set<number>();
+  for (const s of needsClub) {
+    const pid = s.playerId as number;
+    const rows = getPlayerTransfers(pid);
+    perPlayerRows.set(pid, rows);
+    for (const r of rows) {
+      if (r.team_in_id != null) destinationTeamIds.add(r.team_in_id);
+    }
+  }
+  await ensureTeamsClassified([...destinationTeamIds], maxTeamFetches);
+  const destNational =
+    destinationTeamIds.size > 0 ? nationalTeamIds([...destinationTeamIds]) : new Set<number>();
+
+  for (const s of needsClub) {
+    const pid = s.playerId as number;
+    const rows = perPlayerRows.get(pid) ?? [];
+    // Rows are already DESC by date; pick most-recent destination that is a real club.
+    const club = rows.find((r) => {
+      if (r.team_in_id == null || !r.team_in_name) return false;
+      if (destNational.has(r.team_in_id)) return false;
+      return true;
+    });
+    if (club) {
+      s.club = club.team_in_name;
+      s.clubId = club.team_in_id;
+      s.clubCrest = club.team_in_logo;
+    }
+  }
 }
 
 export interface PlayerMatchAppearance {

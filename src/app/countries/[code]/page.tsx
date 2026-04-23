@@ -6,7 +6,7 @@ import {
   getTeamsByCountryCode,
 } from "@/lib/db";
 import { codeToCountryName } from "@/lib/country-codes";
-import { computePlayerStats, enrichPlayerStatsWithNationality } from "@/lib/player-stats";
+import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
 import { aggregateCompetitions, aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
@@ -68,6 +68,7 @@ export default async function CountryPage({
   // Players whose nationality matches this country (regardless of where they play).
   const allPlayers = computePlayerStats(allMatches);
   await enrichPlayerStatsWithNationality(allPlayers);
+  await enrichPlayerStatsWithClub(allPlayers);
   const playersFromCountry = allPlayers.filter((p) => p.countryCode === code);
 
   // Players appearing in matches in this country's competitions (any nationality).
@@ -75,6 +76,7 @@ export default async function CountryPage({
     if (competitionMatches.length === 0) return [];
     const stats = computePlayerStats(competitionMatches);
     await enrichPlayerStatsWithNationality(stats);
+    await enrichPlayerStatsWithClub(stats);
     return stats;
   })();
 
