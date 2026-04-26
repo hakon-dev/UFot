@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import GlobalSearch from "./GlobalSearch";
 
 const links = [
   { href: "/", label: "Matches" },
@@ -15,11 +16,14 @@ export default function Navbar() {
   return (
     <nav className="bg-card border-b border-card-border">
       <div className="max-w-5xl mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
-          <Link href="/" className="text-xl font-bold text-accent">
+        <div className="flex items-center gap-4 h-16">
+          <Link href="/" className="text-xl font-bold text-accent shrink-0">
             UFot
           </Link>
-          <div className="flex gap-1">
+          <div className="flex-1 flex justify-center">
+            <GlobalSearch />
+          </div>
+          <div className="flex gap-1 shrink-0">
             {links.map((link) => {
               const isActive = pathname === link.href;
               return (

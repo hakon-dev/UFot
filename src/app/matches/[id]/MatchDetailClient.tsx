@@ -69,6 +69,12 @@ interface MatchDetails {
   awayTeamId?: number | null;
 }
 
+interface CoachProp {
+  id: number;
+  name: string;
+  photo: string | null;
+}
+
 interface Props {
   matchId: string;
   canFetchDetails: boolean;
@@ -78,6 +84,8 @@ interface Props {
   awayTeam: string;
   homeTeamId: number | null;
   awayTeamId: number | null;
+  homeCoach: CoachProp | null;
+  awayCoach: CoachProp | null;
 }
 
 function GoalTypeIcon({ type }: { type: string | null }) {
@@ -146,6 +154,8 @@ export default function MatchDetailClient({
   awayTeam,
   homeTeamId,
   awayTeamId,
+  homeCoach,
+  awayCoach,
 }: Props) {
   const [details, setDetails] = useState<MatchDetails | null>(null);
   const [loading, setLoading] = useState(false);
@@ -372,7 +382,7 @@ export default function MatchDetailClient({
             </div>
           )}
 
-          {/* Lineups — pitch */}
+          {/* Lineups — pitch with coaches below */}
           {homeStarters.length > 0 && awayStarters.length > 0 && (
             <div className={cardClass}>
               <h2 className="text-lg font-semibold text-white mb-4">Lineups</h2>
@@ -387,6 +397,12 @@ export default function MatchDetailClient({
                 awayStarters={awayStarters.map(toPitchPlayer)}
                 getAnnotations={getAnnotations}
               />
+              {(homeCoach || awayCoach) && (
+                <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-card-border/50">
+                  <CoachBadge coach={homeCoach} align="left" />
+                  <CoachBadge coach={awayCoach} align="right" />
+                </div>
+              )}
             </div>
           )}
 
@@ -425,6 +441,61 @@ export default function MatchDetailClient({
         </>
       )}
     </div>
+  );
+}
+
+function CoachBadge({ coach, align }: { coach: CoachProp | null; align: "left" | "right" }) {
+  // Empty placeholder keeps both halves of the grid the same width even when only one team's
+  // coach is known (lineups can come back with coach info on one side and not the other).
+  if (!coach) return <div />;
+
+  const initials = coach.name
+    .trim()
+    .split(/\s+/)
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  const avatar = coach.photo ? (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      src={coach.photo}
+      alt={coach.name}
+      className="w-8 h-8 rounded-full object-cover bg-surface ring-1 ring-card-border shrink-0"
+    />
+  ) : (
+    <div className="w-8 h-8 rounded-full bg-surface ring-1 ring-card-border flex items-center justify-center shrink-0">
+      <span className="text-[10px] font-bold text-muted">{initials || "?"}</span>
+    </div>
+  );
+
+  const text = (
+    <div className={`min-w-0 ${align === "right" ? "text-right" : "text-left"}`}>
+      <p className="text-[10px] uppercase tracking-wide text-muted leading-tight">Coach</p>
+      <p className="text-sm text-slate-200 truncate">{coach.name}</p>
+    </div>
+  );
+
+  return (
+    <Link
+      href={`/coaches/${coach.id}`}
+      className={`flex items-center gap-2 min-w-0 hover:text-accent transition-colors ${
+        align === "right" ? "justify-end" : ""
+      }`}
+    >
+      {align === "left" ? (
+        <>
+          {avatar}
+          {text}
+        </>
+      ) : (
+        <>
+          {text}
+          {avatar}
+        </>
+      )}
+    </Link>
   );
 }
 

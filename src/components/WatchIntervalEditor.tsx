@@ -37,9 +37,11 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
   const [error, setError] = useState("");
 
   // Keep the draft synced with the committed intervals when we aren't actively editing.
+  // In non-confirm mode there's no Edit/Save gating, so the parent's intervals are always
+  // the source of truth and draft must follow them on every change.
   useEffect(() => {
-    if (!editing) setDraft(intervals);
-  }, [intervals, editing]);
+    if (!confirmMode || !editing) setDraft(intervals);
+  }, [intervals, editing, confirmMode]);
 
   const active = editing ? draft : intervals;
   const isFullMatch = active.length === 1 && active[0][0] === 0 && active[0][1] === 90;

@@ -2,13 +2,15 @@ import { getMatch, getPendingHydrationIds, saveMatchDetails } from "./db";
 import { fetchMatchDetails } from "./football-api";
 
 // Pull details for one match from api-football and persist them. Safe to call repeatedly:
-// returns true for already-hydrated rows, false for manual/legacy rows we can't resolve,
-// and false on transient fetch failures (which leaves `details_fetched` at 0 so the next
-// caller — stats-page rescue or the details route — retries).
+// returns true for already-hydrated *and complete* rows, false for manual/legacy rows we
+// can't resolve, and false on transient fetch failures (which leaves `details_complete=0`
+// so the next caller — stats-page rescue or the details route — retries). A row that was
+// fetched but came back partial (lineups not yet posted, goals trickling in) re-enters this
+// function so `saveMatchDetails` gets another chance to fill the gaps.
 export async function hydrateMatchDetails(matchId: string): Promise<boolean> {
   const match = getMatch(matchId);
   if (!match) return false;
-  if (match.details_fetched) return true;
+  if (match.details_fetched && match.details_complete) return true;
   if (!match.external_match_id || match.external_source !== "api-football") return false;
 
   try {
@@ -65,6 +67,16 @@ export async function hydrateMatchDetails(matchId: string): Promise<boolean> {
         awayFormation: details.awayFormation,
         homeTeamId: details.homeTeamId,
         awayTeamId: details.awayTeamId,
+        refereeName: details.refereeName,
+        homeCoachId: details.homeCoach.id,
+        homeCoachName: details.homeCoach.name,
+        homeCoachPhoto: details.homeCoach.photo,
+        awayCoachId: details.awayCoach.id,
+        awayCoachName: details.awayCoach.name,
+        awayCoachPhoto: details.awayCoach.photo,
+        venueId: details.venueId,
+        venueName: details.venueName,
+        venueCity: details.venueCity,
       }
     );
     return true;

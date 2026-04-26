@@ -1,14 +1,20 @@
 import Link from "next/link";
-import { getAllMatches, getMatchesWithDetails, getStadiumAggregates } from "@/lib/db";
+import {
+  getAllMatches, getMatchesWithDetails, getStadiumAggregates,
+  getCoachAggregates, getCoaches, getRefereeAggregates,
+} from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
 import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
+import { enrichCoachAggregatesWithNationality } from "@/lib/coach-stats";
 import { aggregateCompetitions, aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
 import PlayerStatsTable from "./PlayerStatsTable";
 import CompetitionStatsTable from "./CompetitionStatsTable";
 import TeamStatsTable from "./TeamStatsTable";
 import StadiumStatsTable, { type StadiumStat } from "../stadiums/StadiumStatsTable";
+import CoachStatsTable, { type CoachStat } from "../coaches/CoachStatsTable";
+import RefereeStatsTable, { type RefereeStat } from "../referees/RefereeStatsTable";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 
 export const dynamic = "force-dynamic";
@@ -82,6 +88,32 @@ export default async function StatsPage() {
 
   const competitions = aggregateCompetitions(matches);
   await enrichCompetitionRecordsWithDetails(competitions);
+
+  const coachAggregates = getCoachAggregates();
+  await enrichCoachAggregatesWithNationality(coachAggregates);
+  const coachCachedById = getCoaches(coachAggregates.map((a) => a.coachId));
+  const coachRows: CoachStat[] = coachAggregates.map((a) => {
+    const cache = coachCachedById.get(a.coachId);
+    return {
+      coachId: a.coachId,
+      name: cache?.name ?? a.name,
+      photo: a.photo ?? cache?.photo ?? null,
+      nationality: cache?.nationality ?? null,
+      countryCode: cache?.country_code ?? null,
+      matches: a.matches,
+      minutes: a.minutes,
+      wins: a.wins,
+      draws: a.draws,
+      losses: a.losses,
+    };
+  });
+
+  const refereeAggregates = getRefereeAggregates();
+  const refereeRows: RefereeStat[] = refereeAggregates.map((a) => ({
+    name: a.name,
+    matches: a.matches,
+    minutes: a.minutes,
+  }));
 
   const inPersonItems: PagedMatchItem[] = matches
     .filter((m) => m.watched_in_person === 1)
@@ -159,6 +191,22 @@ export default async function StatsPage() {
             <div className={sectionClass}>
               <SectionHeader title="Most Watched Stadiums (In Person)" href="/stadiums/in-person" />
               <StadiumStatsTable stadiums={stadiumInPersonRows} pageSize={10} matchesLabel="Visits" />
+            </div>
+          )}
+
+          {/* Most Watched Coaches */}
+          {coachRows.length > 0 && (
+            <div className={sectionClass}>
+              <SectionHeader title="Most Watched Coaches" href="/coaches" />
+              <CoachStatsTable coaches={coachRows} pageSize={10} />
+            </div>
+          )}
+
+          {/* Most Watched Referees */}
+          {refereeRows.length > 0 && (
+            <div className={sectionClass}>
+              <SectionHeader title="Most Watched Referees" href="/referees" />
+              <RefereeStatsTable referees={refereeRows} pageSize={10} />
             </div>
           )}
 

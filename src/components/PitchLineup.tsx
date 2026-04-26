@@ -391,7 +391,7 @@ export default function PitchLineup({
   return (
     <div className="space-y-3">
       {/* Team headers */}
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex items-center justify-between gap-3">
         <TeamHeader name={homeTeam} teamId={homeTeamId} formation={homeFormation} align="left" />
         <TeamHeader name={awayTeam} teamId={awayTeamId} formation={awayFormation} align="right" />
       </div>
@@ -436,27 +436,44 @@ function TeamHeader({
   formation: string | null;
   align: "left" | "right";
 }) {
-  const content = (
-    <span className="flex items-center gap-2">
-      {teamId != null && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={`https://media.api-sports.io/football/teams/${teamId}.png`}
-          alt={name}
-          className="w-5 h-5 object-contain"
-        />
-      )}
-      <span className="text-white font-semibold">{name}</span>
-      {formation && <span className="text-muted">{formation}</span>}
+  const crest = teamId != null && (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`https://media.api-sports.io/football/teams/${teamId}.png`}
+      alt={name}
+      className="w-7 h-7 object-contain shrink-0"
+    />
+  );
+  const nameLabel = (
+    <span className="text-white font-bold text-base md:text-lg truncate">{name}</span>
+  );
+  const formationPill = formation && (
+    <span className="text-[11px] md:text-xs tabular-nums font-semibold text-accent bg-accent/10 border border-accent/30 px-2 py-0.5 rounded-md whitespace-nowrap">
+      {formation}
     </span>
   );
-  const className = `${align === "right" ? "text-right" : "text-left"} ${teamId != null ? "hover:text-accent transition-colors" : ""}`;
+
+  const inner = align === "left" ? (
+    <>
+      {crest}
+      {nameLabel}
+      {formationPill}
+    </>
+  ) : (
+    <>
+      {formationPill}
+      {nameLabel}
+      {crest}
+    </>
+  );
+
+  const layout = `flex items-center gap-2 min-w-0 ${align === "right" ? "justify-end" : ""}`;
   if (teamId != null) {
     return (
-      <Link href={`/teams/${teamId}`} className={className}>
-        {content}
+      <Link href={`/teams/${teamId}`} className={`${layout} hover:text-accent transition-colors`}>
+        {inner}
       </Link>
     );
   }
-  return <div className={className}>{content}</div>;
+  return <div className={layout}>{inner}</div>;
 }

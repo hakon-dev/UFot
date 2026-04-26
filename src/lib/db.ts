@@ -87,6 +87,29 @@ if (!columnNames.includes("venue_city")) {
 if (!columnNames.includes("watched_in_person")) {
   db.exec("ALTER TABLE matches ADD COLUMN watched_in_person INTEGER DEFAULT 0");
 }
+if (!columnNames.includes("referee_name")) {
+  db.exec("ALTER TABLE matches ADD COLUMN referee_name TEXT");
+}
+if (!columnNames.includes("home_coach_id")) {
+  db.exec("ALTER TABLE matches ADD COLUMN home_coach_id INTEGER");
+}
+if (!columnNames.includes("home_coach_name")) {
+  db.exec("ALTER TABLE matches ADD COLUMN home_coach_name TEXT");
+}
+if (!columnNames.includes("away_coach_id")) {
+  db.exec("ALTER TABLE matches ADD COLUMN away_coach_id INTEGER");
+}
+if (!columnNames.includes("away_coach_name")) {
+  db.exec("ALTER TABLE matches ADD COLUMN away_coach_name TEXT");
+}
+// `details_fetched` only records that we *tried* to hydrate. `details_complete` records that the
+// payload we got back was actually full. Splitting the two lets us retry partially-fetched rows
+// (lineups not yet posted, events still trickling in) without making the match invisible to
+// stats in the meantime — the row stays `details_fetched=1` so it shows in aggregates, while
+// `details_complete=0` keeps it on the rescue loop.
+if (!columnNames.includes("details_complete")) {
+  db.exec("ALTER TABLE matches ADD COLUMN details_complete INTEGER DEFAULT 0");
+}
 
 // Detail tables
 db.exec(`
@@ -221,6 +244,17 @@ db.exec(`
 `);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS coaches (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    photo TEXT,
+    nationality TEXT,
+    country_code TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS player_transfers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id INTEGER NOT NULL,
@@ -292,6 +326,59 @@ if (userVersion < 7) {
   db.exec(`DELETE FROM teams WHERE national IS NULL`);
   db.pragma("user_version = 7");
 }
+//   v8 — `details_complete` column added. Classify every existing api-football row: complete
+//        means both teams have at least one starter row AND the saved goal-event count is at
+//        least home_score + away_score (Brann vs Aalesund 2026-04-22 was hydrated before
+//        lineups had been published; Senegal vs Morocco 2026-01-18 saved 1 of 3 goal events).
+//        Both bugs were silent because `details_fetched=1` blocked any retry.
+if (userVersion < 8) {
+  db.exec(`
+    UPDATE matches
+    SET details_complete = 1
+    WHERE details_fetched = 1
+      AND external_source = 'api-football'
+      AND EXISTS (
+        SELECT 1 FROM match_lineups
+        WHERE match_id = matches.id AND team = 'home' AND is_starter = 1
+      )
+      AND EXISTS (
+        SELECT 1 FROM match_lineups
+        WHERE match_id = matches.id AND team = 'away' AND is_starter = 1
+      )
+      AND (
+        SELECT COUNT(*) FROM match_goals WHERE match_id = matches.id
+      ) >= matches.home_score + matches.away_score
+  `);
+  db.pragma("user_version = 8");
+}
+//   v9 — referee + coach columns added on `matches` and a `coaches` cache table introduced.
+//        Existing api-football rows have NULL coach/referee fields. Flip details_complete=0
+//        so the rescue loop re-hydrates them and picks up the new fields. Each match costs
+//        3 API requests; bounded by hydratePendingMatches limits + the 100/day cap. Rows
+//        whose API response still doesn't include a coach (lineups not posted, etc.) will
+//        flip back to complete=0 on retry — that's fine, they'll keep the partial data.
+if (userVersion < 9) {
+  db.exec(`
+    UPDATE matches SET details_complete = 0
+    WHERE external_source = 'api-football' AND details_fetched = 1
+  `);
+  db.pragma("user_version = 9");
+}
+//   v10 — `fetchMatchDetails` now reads `fixture.venue.{id, name, city}` from the existing
+//        /fixtures?id=X call and persists it via `saveMatchDetails`. Older rows were hydrated
+//        before that path existed, so `venue_id IS NULL` even though the API has the data.
+//        Flip details_complete=0 only for those rows so the rescue loop re-hydrates them and
+//        backfills the venue. Targeted (vs blanket) to avoid burning API budget on rows that
+//        already have venue data.
+if (userVersion < 10) {
+  db.exec(`
+    UPDATE matches SET details_complete = 0
+    WHERE external_source = 'api-football'
+      AND details_fetched = 1
+      AND venue_id IS NULL
+  `);
+  db.pragma("user_version = 10");
+}
 
 // NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null
 // home_formation or any sub with null player_in_id and purged the match's details so the
@@ -319,6 +406,7 @@ export interface Match {
   external_source: string | null;
   watch_intervals: string;
   details_fetched: number;
+  details_complete: number;
   created_at: string;
   home_team_id: number | null;
   away_team_id: number | null;
@@ -328,6 +416,11 @@ export interface Match {
   venue_id: number | null;
   venue_city: string | null;
   watched_in_person: number;
+  referee_name: string | null;
+  home_coach_id: number | null;
+  home_coach_name: string | null;
+  away_coach_id: number | null;
+  away_coach_name: string | null;
 }
 
 export interface MatchGoal {
@@ -461,6 +554,259 @@ export interface StadiumAggregate {
   lastVisit: string | null;
 }
 
+// Local-cache search. LIKE %q% on each table; case-insensitive via LOWER(). Limits are small
+// because results render in a Navbar dropdown.
+
+export interface StadiumSearchHit {
+  venueId: number;
+  venueName: string;
+  venueCity: string | null;
+}
+
+function likeQuery(q: string): string {
+  return `%${q.toLowerCase().replace(/[%_]/g, (c) => "\\" + c)}%`;
+}
+
+export function searchTeamsCache(q: string, limit = 8): TeamRecord[] {
+  if (!q.trim()) return [];
+  return db
+    .prepare(
+      `SELECT * FROM teams WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+    )
+    .all(likeQuery(q), limit) as TeamRecord[];
+}
+
+export function searchPlayersCache(q: string, limit = 8): PlayerRecord[] {
+  if (!q.trim()) return [];
+  return db
+    .prepare(
+      `SELECT * FROM players WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+    )
+    .all(likeQuery(q), limit) as PlayerRecord[];
+}
+
+export function searchCompetitionsCache(q: string, limit = 8): CompetitionRecord[] {
+  if (!q.trim()) return [];
+  return db
+    .prepare(
+      `SELECT * FROM competitions WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+    )
+    .all(likeQuery(q), limit) as CompetitionRecord[];
+}
+
+// Stadiums aren't a first-class cache table — they live as venue_id/venue/venue_city columns on
+// matches. Group by venue_id to avoid duplicates from multiple matches at the same ground.
+export function searchStadiumsCache(q: string, limit = 8): StadiumSearchHit[] {
+  if (!q.trim()) return [];
+  return db
+    .prepare(
+      `SELECT venue_id AS venueId, venue AS venueName, MAX(venue_city) AS venueCity
+       FROM matches
+       WHERE venue_id IS NOT NULL AND LOWER(venue) LIKE ? ESCAPE '\\'
+       GROUP BY venue_id, venue
+       ORDER BY venue
+       LIMIT ?`
+    )
+    .all(likeQuery(q), limit) as StadiumSearchHit[];
+}
+
+export function searchCoachesCache(q: string, limit = 8): CoachRecord[] {
+  if (!q.trim()) return [];
+  return db
+    .prepare(
+      `SELECT * FROM coaches WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+    )
+    .all(likeQuery(q), limit) as CoachRecord[];
+}
+
+export interface RefereeSearchHit {
+  name: string;
+  matches: number;
+}
+
+// Referees have no API-Football id and no profile endpoint — the only signal is `fixture.referee`,
+// a free-text name we persist on `matches.referee_name`. Aggregate by name with a count so the
+// search dropdown can show "John Doe (5 matches)" and link straight to the drill-down.
+export function searchRefereesCache(q: string, limit = 8): RefereeSearchHit[] {
+  if (!q.trim()) return [];
+  return db
+    .prepare(
+      `SELECT referee_name AS name, COUNT(*) AS matches
+       FROM matches
+       WHERE referee_name IS NOT NULL AND TRIM(referee_name) <> ''
+         AND LOWER(referee_name) LIKE ? ESCAPE '\\'
+       GROUP BY referee_name
+       ORDER BY matches DESC, referee_name
+       LIMIT ?`
+    )
+    .all(likeQuery(q), limit) as RefereeSearchHit[];
+}
+
+export interface CoachAggregate {
+  coachId: number;
+  name: string;
+  photo: string | null;
+  matches: number;
+  minutes: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  firstMatch: string | null;
+  lastMatch: string | null;
+}
+
+export interface RefereeAggregate {
+  name: string;
+  matches: number;
+  minutes: number;
+  firstMatch: string | null;
+  lastMatch: string | null;
+}
+
+// Walk every match with coach data and accumulate per-coach totals. A coach can show up on the
+// home side in some matches and the away side in others (when their team plays both at home and
+// away through the season), so we attribute each match to the coach that was on that side.
+// Photo is read lazily from the coaches cache to keep the query simple — the table page joins
+// on the cache.
+export function getCoachAggregates(): CoachAggregate[] {
+  const rows = db
+    .prepare(
+      `SELECT id, home_score, away_score, home_coach_id, home_coach_name,
+              away_coach_id, away_coach_name, watch_intervals, date
+       FROM matches
+       WHERE home_coach_id IS NOT NULL OR away_coach_id IS NOT NULL`
+    )
+    .all() as Array<{
+      id: string;
+      home_score: number;
+      away_score: number;
+      home_coach_id: number | null;
+      home_coach_name: string | null;
+      away_coach_id: number | null;
+      away_coach_name: string | null;
+      watch_intervals: string | null;
+      date: string;
+    }>;
+
+  const map = new Map<number, CoachAggregate>();
+
+  function tally(
+    coachId: number | null,
+    coachName: string | null,
+    side: "home" | "away",
+    homeScore: number,
+    awayScore: number,
+    minutes: number,
+    date: string
+  ): void {
+    if (coachId == null || !coachName) return;
+    let agg = map.get(coachId);
+    if (!agg) {
+      agg = {
+        coachId,
+        name: coachName,
+        photo: null,
+        matches: 0,
+        minutes: 0,
+        wins: 0,
+        draws: 0,
+        losses: 0,
+        firstMatch: null,
+        lastMatch: null,
+      };
+      map.set(coachId, agg);
+    }
+    agg.matches += 1;
+    agg.minutes += minutes;
+    if (homeScore === awayScore) agg.draws += 1;
+    else if ((side === "home" && homeScore > awayScore) || (side === "away" && awayScore > homeScore)) agg.wins += 1;
+    else agg.losses += 1;
+    if (!agg.firstMatch || date < agg.firstMatch) agg.firstMatch = date;
+    if (!agg.lastMatch || date > agg.lastMatch) agg.lastMatch = date;
+  }
+
+  for (const r of rows) {
+    const intervals: number[][] = (() => {
+      try {
+        return JSON.parse(r.watch_intervals || "[[0,90]]");
+      } catch {
+        return [[0, 90]];
+      }
+    })();
+    const minutes = intervals.reduce((s, [a, b]) => s + (b - a), 0);
+    tally(r.home_coach_id, r.home_coach_name, "home", r.home_score, r.away_score, minutes, r.date);
+    tally(r.away_coach_id, r.away_coach_name, "away", r.home_score, r.away_score, minutes, r.date);
+  }
+
+  // Backfill photos from the coaches cache so the table can render avatars.
+  const ids = [...map.keys()];
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => "?").join(",");
+    const cache = db
+      .prepare(`SELECT id, photo FROM coaches WHERE id IN (${placeholders})`)
+      .all(...ids) as { id: number; photo: string | null }[];
+    for (const row of cache) {
+      const agg = map.get(row.id);
+      if (agg) agg.photo = row.photo;
+    }
+  }
+
+  return [...map.values()];
+}
+
+export function getRefereeAggregates(): RefereeAggregate[] {
+  const rows = db
+    .prepare(
+      `SELECT referee_name, watch_intervals, date
+       FROM matches
+       WHERE referee_name IS NOT NULL AND TRIM(referee_name) <> ''`
+    )
+    .all() as Array<{ referee_name: string; watch_intervals: string | null; date: string }>;
+
+  const map = new Map<string, RefereeAggregate>();
+  for (const r of rows) {
+    const intervals: number[][] = (() => {
+      try {
+        return JSON.parse(r.watch_intervals || "[[0,90]]");
+      } catch {
+        return [[0, 90]];
+      }
+    })();
+    const minutes = intervals.reduce((s, [a, b]) => s + (b - a), 0);
+    const name = r.referee_name.trim();
+    let agg = map.get(name);
+    if (!agg) {
+      agg = { name, matches: 0, minutes: 0, firstMatch: null, lastMatch: null };
+      map.set(name, agg);
+    }
+    agg.matches += 1;
+    agg.minutes += minutes;
+    if (!agg.firstMatch || r.date < agg.firstMatch) agg.firstMatch = r.date;
+    if (!agg.lastMatch || r.date > agg.lastMatch) agg.lastMatch = r.date;
+  }
+  return [...map.values()];
+}
+
+export function getMatchesByCoachId(coachId: number): Match[] {
+  return db
+    .prepare(
+      `SELECT * FROM matches
+       WHERE home_coach_id = ? OR away_coach_id = ?
+       ORDER BY date DESC, created_at DESC`
+    )
+    .all(coachId, coachId) as Match[];
+}
+
+export function getMatchesByRefereeName(name: string): Match[] {
+  return db
+    .prepare(
+      `SELECT * FROM matches
+       WHERE referee_name = ?
+       ORDER BY date DESC, created_at DESC`
+    )
+    .all(name) as Match[];
+}
+
 export function getStadiumAggregates(): StadiumAggregate[] {
   const rows = db
     .prepare(
@@ -527,6 +873,16 @@ export function saveMatchDetails(
     awayFormation?: string | null;
     homeTeamId?: number | null;
     awayTeamId?: number | null;
+    refereeName?: string | null;
+    homeCoachId?: number | null;
+    homeCoachName?: string | null;
+    homeCoachPhoto?: string | null;
+    awayCoachId?: number | null;
+    awayCoachName?: string | null;
+    awayCoachPhoto?: string | null;
+    venueId?: number | null;
+    venueName?: string | null;
+    venueCity?: string | null;
   }
 ): void {
   const insertGoal = db.prepare(
@@ -575,18 +931,71 @@ export function saveMatchDetails(
         matchId, c.minute, c.team, c.player_name, c.player_id ?? null, c.card_type
       );
     }
+    // Completeness: both teams have at least one starter AND the saved goal-event count meets
+    // or exceeds the final score. Formations and substitution counts are NOT checked because
+    // the API legitimately returns null formations and variable sub counts for valid matches.
+    // If incomplete, the row is still saved (so partial data shows in stats and on the detail
+    // page) but `details_complete=0` keeps it on the rescue loop until lineups/events catch up.
+    const scoreRow = db
+      .prepare("SELECT home_score, away_score FROM matches WHERE id = ?")
+      .get(matchId) as { home_score: number; away_score: number } | undefined;
+    const homeStarters = lineups.filter((l) => l.team === "home" && l.is_starter === 1).length;
+    const awayStarters = lineups.filter((l) => l.team === "away" && l.is_starter === 1).length;
+    const totalScore = (scoreRow?.home_score ?? 0) + (scoreRow?.away_score ?? 0);
+    const complete = homeStarters > 0 && awayStarters > 0 && goals.length >= totalScore ? 1 : 0;
+
     if (meta) {
       db.prepare(
-        "UPDATE matches SET details_fetched = 1, home_formation = ?, away_formation = ?, home_team_id = COALESCE(?, home_team_id), away_team_id = COALESCE(?, away_team_id) WHERE id = ?"
+        `UPDATE matches SET
+          details_fetched = 1,
+          details_complete = ?,
+          home_formation = ?,
+          away_formation = ?,
+          home_team_id = COALESCE(?, home_team_id),
+          away_team_id = COALESCE(?, away_team_id),
+          referee_name = COALESCE(?, referee_name),
+          home_coach_id = COALESCE(?, home_coach_id),
+          home_coach_name = COALESCE(?, home_coach_name),
+          away_coach_id = COALESCE(?, away_coach_id),
+          away_coach_name = COALESCE(?, away_coach_name),
+          venue_id = COALESCE(?, venue_id),
+          venue = COALESCE(?, venue),
+          venue_city = COALESCE(?, venue_city)
+        WHERE id = ?`
       ).run(
+        complete,
         meta.homeFormation ?? null,
         meta.awayFormation ?? null,
         meta.homeTeamId ?? null,
         meta.awayTeamId ?? null,
+        meta.refereeName ?? null,
+        meta.homeCoachId ?? null,
+        meta.homeCoachName ?? null,
+        meta.awayCoachId ?? null,
+        meta.awayCoachName ?? null,
+        meta.venueId ?? null,
+        meta.venueName ?? null,
+        meta.venueCity ?? null,
         matchId
       );
+
+      // Mirror coach identity into the cache so search and drill-down pages see the coach
+      // even when the only signal we have is a fixture lineup (no separate /coachs fetch).
+      const upsertCoachStmt = db.prepare(
+        `INSERT INTO coaches (id, name, photo, fetched_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           photo = COALESCE(excluded.photo, coaches.photo)`
+      );
+      if (meta.homeCoachId != null && meta.homeCoachName) {
+        upsertCoachStmt.run(meta.homeCoachId, meta.homeCoachName, meta.homeCoachPhoto ?? null);
+      }
+      if (meta.awayCoachId != null && meta.awayCoachName) {
+        upsertCoachStmt.run(meta.awayCoachId, meta.awayCoachName, meta.awayCoachPhoto ?? null);
+      }
     } else {
-      db.prepare("UPDATE matches SET details_fetched = 1 WHERE id = ?").run(matchId);
+      db.prepare("UPDATE matches SET details_fetched = 1, details_complete = ? WHERE id = ?").run(complete, matchId);
     }
   });
 
@@ -625,10 +1034,12 @@ export function deleteMatch(id: string): void {
 }
 
 export function getPendingHydrationIds(limit: number): string[] {
+  // Includes both never-fetched rows AND rows that were fetched with incomplete payloads
+  // (lineups missing, goals missing) — `details_complete=0` covers both cases.
   const rows = db
     .prepare(
       `SELECT id FROM matches
-       WHERE details_fetched = 0
+       WHERE (details_fetched = 0 OR details_complete = 0)
          AND external_source = 'api-football'
          AND external_match_id IS NOT NULL
        ORDER BY date DESC
@@ -823,6 +1234,53 @@ export function upsertCompetition(record: {
   ).run(
     record.id, record.name, record.country, record.countryCode, record.logo
   );
+}
+
+export interface CoachRecord {
+  id: number;
+  name: string;
+  photo: string | null;
+  nationality: string | null;
+  country_code: string | null;
+  fetched_at: string;
+}
+
+export function getCoach(id: number): CoachRecord | undefined {
+  return db.prepare("SELECT * FROM coaches WHERE id = ?").get(id) as CoachRecord | undefined;
+}
+
+export function getCoaches(ids: number[]): Map<number, CoachRecord> {
+  const map = new Map<number, CoachRecord>();
+  if (ids.length === 0) return map;
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT * FROM coaches WHERE id IN (${placeholders})`)
+    .all(...ids) as CoachRecord[];
+  for (const row of rows) map.set(row.id, row);
+  return map;
+}
+
+// Upsert that preserves nationality/country_code/photo when the new payload doesn't include
+// them — the lineup-derived path only knows id+name+photo, while a /coachs?id=X enrichment
+// fills in nationality. Without COALESCE on the conflict-update, an enrichment write would
+// be wiped out by the next match-hydration upsert.
+export function upsertCoach(record: {
+  id: number;
+  name: string;
+  photo: string | null;
+  nationality: string | null;
+  countryCode: string | null;
+}): void {
+  db.prepare(
+    `INSERT INTO coaches (id, name, photo, nationality, country_code, fetched_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       photo = COALESCE(excluded.photo, coaches.photo),
+       nationality = COALESCE(excluded.nationality, coaches.nationality),
+       country_code = COALESCE(excluded.country_code, coaches.country_code),
+       fetched_at = excluded.fetched_at`
+  ).run(record.id, record.name, record.photo, record.nationality, record.countryCode);
 }
 
 export interface PlayerTransferRecord {

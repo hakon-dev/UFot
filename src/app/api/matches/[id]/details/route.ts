@@ -168,9 +168,14 @@ export async function GET(
     return NextResponse.json({ available: false });
   }
 
-  if (!match.details_fetched) {
+  // Re-hydrate when never fetched OR previously fetched with incomplete data (lineups/goals
+  // not yet posted at first fetch). For incomplete rows we already have something to show, so
+  // a hydration failure isn't fatal — fall through and serve the partial data we have.
+  const needsFetch = !match.details_fetched || !match.details_complete;
+  const canFetch = match.external_match_id && match.external_source === "api-football";
+  if (needsFetch && canFetch) {
     const ok = await hydrateMatchDetails(id);
-    if (!ok) {
+    if (!ok && !match.details_fetched) {
       return NextResponse.json(
         { error: "Failed to fetch match details" },
         { status: 502 }

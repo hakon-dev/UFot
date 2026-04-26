@@ -1,4 +1,4 @@
-import { getMatch } from "@/lib/db";
+import { getMatch, getCoaches } from "@/lib/db";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import MatchDetailClient from "./MatchDetailClient";
@@ -31,6 +31,17 @@ export default async function MatchDetailPage({
 
   const minutes = watchIntervals.reduce((sum, [s, e]) => sum + (e - s), 0);
 
+  // Pull coach photos from the coaches cache; the match record already carries id+name. Photos
+  // ride along on the same query as the rest of the cache lookup so this stays a single hit.
+  const coachIds = [match.home_coach_id, match.away_coach_id].filter(
+    (id): id is number => id != null
+  );
+  const coachCache = getCoaches(coachIds);
+  const homeCoachPhoto =
+    match.home_coach_id != null ? coachCache.get(match.home_coach_id)?.photo ?? null : null;
+  const awayCoachPhoto =
+    match.away_coach_id != null ? coachCache.get(match.away_coach_id)?.photo ?? null : null;
+
   return (
     <div className="space-y-6">
       {/* Back link + delete */}
@@ -53,27 +64,25 @@ export default async function MatchDetailPage({
 
         {/* Teams and score */}
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {match.home_crest && (
-              <img src={match.home_crest} alt={match.home_team} className="w-10 h-10 object-contain" />
-            )}
-            <span className={`font-bold text-xl truncate ${match.home_score > match.away_score ? "text-accent" : "text-slate-200"}`}>
-              {match.home_team}
-            </span>
-          </div>
+          <TeamSide
+            name={match.home_team}
+            teamId={match.home_team_id}
+            crest={match.home_crest}
+            isWinner={match.home_score > match.away_score}
+            align="left"
+          />
 
           <div className="text-3xl font-bold text-white tabular-nums shrink-0 px-3">
             {match.home_score} - {match.away_score}
           </div>
 
-          <div className="flex items-center gap-3 flex-1 min-w-0 justify-end">
-            <span className={`font-bold text-xl truncate text-right ${match.away_score > match.home_score ? "text-accent" : "text-slate-200"}`}>
-              {match.away_team}
-            </span>
-            {match.away_crest && (
-              <img src={match.away_crest} alt={match.away_team} className="w-10 h-10 object-contain" />
-            )}
-          </div>
+          <TeamSide
+            name={match.away_team}
+            teamId={match.away_team_id}
+            crest={match.away_crest}
+            isWinner={match.away_score > match.home_score}
+            align="right"
+          />
         </div>
 
         {/* Metadata */}
@@ -109,6 +118,18 @@ export default async function MatchDetailPage({
               </span>
             )
           )}
+          {match.referee_name && (
+            <Link
+              href={`/referees/${encodeURIComponent(match.referee_name)}`}
+              className="inline-flex items-center gap-1 hover:text-accent transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              {match.referee_name}
+            </Link>
+          )}
           {match.watched_in_person === 1 && (
             <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
               In person
@@ -127,7 +148,63 @@ export default async function MatchDetailPage({
         awayTeam={match.away_team}
         homeTeamId={match.home_team_id}
         awayTeamId={match.away_team_id}
+        homeCoach={
+          match.home_coach_id != null && match.home_coach_name
+            ? { id: match.home_coach_id, name: match.home_coach_name, photo: homeCoachPhoto }
+            : null
+        }
+        awayCoach={
+          match.away_coach_id != null && match.away_coach_name
+            ? { id: match.away_coach_id, name: match.away_coach_name, photo: awayCoachPhoto }
+            : null
+        }
       />
     </div>
   );
+}
+
+function TeamSide({
+  name,
+  teamId,
+  crest,
+  isWinner,
+  align,
+}: {
+  name: string;
+  teamId: number | null;
+  crest: string | null;
+  isWinner: boolean;
+  align: "left" | "right";
+}) {
+  const wrapper =
+    align === "left"
+      ? "flex items-center gap-3 flex-1 min-w-0"
+      : "flex items-center gap-3 flex-1 min-w-0 justify-end";
+  const nameClass = `font-bold text-xl truncate ${align === "right" ? "text-right" : ""} ${
+    isWinner ? "text-accent" : "text-slate-200"
+  }`;
+  const inner = (
+    <>
+      {align === "left" && crest && (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={crest} alt={name} className="w-10 h-10 object-contain shrink-0" />
+      )}
+      <span className={nameClass}>{name}</span>
+      {align === "right" && crest && (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={crest} alt={name} className="w-10 h-10 object-contain shrink-0" />
+      )}
+    </>
+  );
+  if (teamId != null) {
+    return (
+      <Link
+        href={`/teams/${teamId}`}
+        className={`${wrapper} hover:text-accent transition-colors group`}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return <div className={wrapper}>{inner}</div>;
 }

@@ -5,6 +5,7 @@ interface ApiFootballFixture {
     id: number;
     date: string;
     timezone: string;
+    referee: string | null;
     venue: { id: number | null; name: string | null; city: string | null };
     status: { long: string; short: string; elapsed: number | null };
   };
@@ -187,6 +188,12 @@ export interface LineupPlayerDetail {
   grid: string | null;
 }
 
+export interface CoachInfo {
+  id: number | null;
+  name: string | null;
+  photo: string | null;
+}
+
 export interface MatchDetailResult {
   goals: Array<{
     minute: number;
@@ -218,6 +225,18 @@ export interface MatchDetailResult {
   awayFormation: string | null;
   homeTeamId: number | null;
   awayTeamId: number | null;
+  homeCoach: CoachInfo;
+  awayCoach: CoachInfo;
+  refereeName: string | null;
+  venueId: number | null;
+  venueName: string | null;
+  venueCity: string | null;
+}
+
+function toCoachInfo(lineup: ApiFootballLineup | undefined): CoachInfo {
+  const c = lineup?.coach;
+  if (!c || c.id == null || !c.name) return { id: null, name: null, photo: null };
+  return { id: c.id, name: c.name, photo: c.photo ?? null };
 }
 
 function mapGoalType(detail: string): string {
@@ -557,6 +576,125 @@ export async function fetchPlayerTransfers(
   }));
 }
 
+// Search endpoints — all require min 3 chars on API-Football. Each call costs 1 request from
+// the daily quota, so callers should debounce + only fire when q.length >= 3.
+
+export interface TeamSearchResult {
+  id: number;
+  name: string;
+  country: string | null;
+  logo: string | null;
+  national: boolean | null;
+}
+
+interface ApiFootballTeamSearchRow {
+  team: { id: number; name: string; country: string | null; logo: string | null; national: boolean | null };
+}
+
+export async function searchTeamsApi(query: string): Promise<TeamSearchResult[]> {
+  if (query.trim().length < 3) return [];
+  const res = await fetchApi(`/teams?search=${encodeURIComponent(query.trim())}`);
+  if (!res.ok) throw new Error(`api-football error: teams search ${res.status}`);
+  const data: ApiFootballResponse<ApiFootballTeamSearchRow> = await res.json();
+  if (isRateLimited(data.errors)) throw new Error("api-football rate-limited: teams search");
+  return (data.response ?? []).map((r) => ({
+    id: r.team.id,
+    name: r.team.name,
+    country: r.team.country ?? null,
+    logo: r.team.logo ?? null,
+    national: r.team.national ?? null,
+  }));
+}
+
+export interface LeagueSearchResult {
+  id: number;
+  name: string;
+  country: string | null;
+  logo: string | null;
+}
+
+interface ApiFootballLeagueSearchRow {
+  league: { id: number; name: string; logo: string | null };
+  country: { name: string | null };
+}
+
+export async function searchLeaguesApi(query: string): Promise<LeagueSearchResult[]> {
+  if (query.trim().length < 3) return [];
+  const res = await fetchApi(`/leagues?search=${encodeURIComponent(query.trim())}`);
+  if (!res.ok) throw new Error(`api-football error: leagues search ${res.status}`);
+  const data: ApiFootballResponse<ApiFootballLeagueSearchRow> = await res.json();
+  if (isRateLimited(data.errors)) throw new Error("api-football rate-limited: leagues search");
+  return (data.response ?? []).map((r) => ({
+    id: r.league.id,
+    name: r.league.name,
+    country: r.country?.name ?? null,
+    logo: r.league.logo ?? null,
+  }));
+}
+
+export interface PlayerSearchResult {
+  id: number;
+  name: string;
+  nationality: string | null;
+  photo: string | null;
+}
+
+interface ApiFootballPlayerSearchRow {
+  player: {
+    id: number;
+    name: string;
+    firstname: string | null;
+    lastname: string | null;
+    nationality: string | null;
+    photo: string | null;
+  };
+}
+
+// /players/profiles?search=X searches by last name (min 3 chars). Returns abbreviated names like
+// "L. Messi" — we run the same expandAbbreviatedName pass we use for cached players so the UI
+// shows "Lionel Messi" when firstname[0] matches the abbreviation initial.
+export async function searchPlayersApi(query: string): Promise<PlayerSearchResult[]> {
+  if (query.trim().length < 3) return [];
+  const res = await fetchApi(`/players/profiles?search=${encodeURIComponent(query.trim())}`);
+  if (!res.ok) throw new Error(`api-football error: players search ${res.status}`);
+  const data: ApiFootballResponse<ApiFootballPlayerSearchRow> = await res.json();
+  if (isRateLimited(data.errors)) throw new Error("api-football rate-limited: players search");
+  return (data.response ?? []).map((r) => ({
+    id: r.player.id,
+    name: expandAbbreviatedName(r.player.name, r.player.firstname, r.player.lastname),
+    nationality: r.player.nationality ?? null,
+    photo: r.player.photo ?? null,
+  }));
+}
+
+export interface VenueSearchResult {
+  id: number;
+  name: string;
+  city: string | null;
+  country: string | null;
+}
+
+interface ApiFootballVenueSearchRow {
+  id: number;
+  name: string;
+  city: string | null;
+  country: string | null;
+}
+
+export async function searchVenuesApi(query: string): Promise<VenueSearchResult[]> {
+  if (query.trim().length < 3) return [];
+  const res = await fetchApi(`/venues?search=${encodeURIComponent(query.trim())}`);
+  if (!res.ok) throw new Error(`api-football error: venues search ${res.status}`);
+  const data: ApiFootballResponse<ApiFootballVenueSearchRow> = await res.json();
+  if (isRateLimited(data.errors)) throw new Error("api-football rate-limited: venues search");
+  return (data.response ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    city: r.city ?? null,
+    country: r.country ?? null,
+  }));
+}
+
 export async function fetchFixtureSummary(
   fixtureId: number,
   timeZone: string = "UTC"
@@ -641,5 +779,74 @@ export async function fetchMatchDetails(
     awayFormation: awayLineup?.formation ?? null,
     homeTeamId: homeTeamId ?? null,
     awayTeamId: awayTeamId ?? null,
+    homeCoach: toCoachInfo(homeLineup),
+    awayCoach: toCoachInfo(awayLineup),
+    refereeName: fixture.response[0]?.fixture.referee ?? null,
+    venueId: fixture.response[0]?.fixture.venue.id ?? null,
+    venueName: fixture.response[0]?.fixture.venue.name ?? null,
+    venueCity: fixture.response[0]?.fixture.venue.city ?? null,
   };
+}
+
+interface ApiFootballCoachProfile {
+  id: number;
+  name: string;
+  firstname: string | null;
+  lastname: string | null;
+  nationality: string | null;
+  photo: string | null;
+}
+
+export interface CoachProfileResult {
+  id: number;
+  name: string;
+  nationality: string | null;
+  photo: string | null;
+}
+
+// API-Football's path is `/coachs` (their localization spelling — not "coaches"). Returns a
+// profile keyed by id. Same rate-limit-aware pattern as fetchPlayerProfile.
+export async function fetchCoachProfile(
+  coachId: number
+): Promise<CoachProfileResult | null> {
+  const res = await fetchApi(`/coachs?id=${coachId}`);
+  if (res.status === 429) {
+    throw new Error(`api-football rate-limited: /coachs?id=${coachId}`);
+  }
+  if (!res.ok) {
+    throw new Error(`api-football error: coachs ${res.status}`);
+  }
+  const data: ApiFootballResponse<ApiFootballCoachProfile> = await res.json();
+  if (isRateLimited(data.errors)) {
+    throw new Error(`api-football rate-limited: /coachs?id=${coachId}`);
+  }
+  const row = data.response?.[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    nationality: row.nationality ?? null,
+    photo: row.photo ?? null,
+  };
+}
+
+export interface CoachSearchResult {
+  id: number;
+  name: string;
+  nationality: string | null;
+  photo: string | null;
+}
+
+export async function searchCoachesApi(query: string): Promise<CoachSearchResult[]> {
+  if (query.trim().length < 3) return [];
+  const res = await fetchApi(`/coachs?search=${encodeURIComponent(query.trim())}`);
+  if (!res.ok) throw new Error(`api-football error: coachs search ${res.status}`);
+  const data: ApiFootballResponse<ApiFootballCoachProfile> = await res.json();
+  if (isRateLimited(data.errors)) throw new Error("api-football rate-limited: coachs search");
+  return (data.response ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    nationality: r.nationality ?? null,
+    photo: r.photo ?? null,
+  }));
 }
