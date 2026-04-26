@@ -26,6 +26,9 @@ export interface TeamProfile {
   teamId: number;
   name: string;
   crestUrl: string;
+  country: string | null;
+  countryCode: string | null;
+  national: boolean | null;
   wins: number;
   draws: number;
   losses: number;
@@ -34,6 +37,27 @@ export interface TeamProfile {
   totalMinutes: number;
   totalMatches: number;
   appearances: TeamMatchAppearance[];
+}
+
+// API-Football encodes gender as a trailing " W" / "(W)" / "Women" and age as "U-NN" in the
+// team name. Senior teams have no age token. Used by both the country page (split into two
+// columns) and the team page (label).
+export interface NationalTeamClassification {
+  gender: "men" | "women";
+  age: number | null;
+  isSenior: boolean;
+}
+
+export function classifyNationalTeam(name: string): NationalTeamClassification {
+  const isWomen =
+    /\bwomen\b/i.test(name) || /\(w\)/i.test(name) || /\sw\b/i.test(name);
+  const ageMatch = name.match(/\bu[-\s]?(\d{1,2})\b/i);
+  const age = ageMatch ? parseInt(ageMatch[1], 10) : null;
+  return {
+    gender: isWomen ? "women" : "men",
+    age,
+    isSenior: age === null,
+  };
 }
 
 function parseIntervals(raw: string | null): number[][] {
@@ -48,13 +72,48 @@ function minutesFor(match: Match): number {
   return parseIntervals(match.watch_intervals).reduce((s, [a, b]) => s + (b - a), 0);
 }
 
-export function getTeamProfile(teamId: number): TeamProfile | null {
+export async function getTeamProfile(teamId: number): Promise<TeamProfile | null> {
   const matches = getAllMatches();
   const mine = matches.filter((m) => m.home_team_id === teamId || m.away_team_id === teamId);
-  if (mine.length === 0) return null;
+
+  // Pull country / national / name / logo from the teams cache, lazy-fetching if absent. We need
+  // these regardless of whether the team has watched matches — when there are zero matches the
+  // page still renders a "not watched yet" stub, which only works if we can resolve a name+crest.
+  const cacheRow = getTeams([teamId]).get(teamId) ?? null;
+  let country: string | null = cacheRow?.country ?? null;
+  let countryCode: string | null = cacheRow?.country_code ?? null;
+  let national: boolean | null = cacheRow?.national == null ? null : cacheRow.national === 1;
+  let cacheName: string | null = cacheRow?.name ?? null;
+  let cacheLogo: string | null = cacheRow?.logo ?? null;
+  if (!cacheRow || cacheRow.national == null) {
+    try {
+      const profile = await fetchTeamProfile(teamId);
+      if (profile) {
+        const code = countryNameToCode(profile.country);
+        upsertTeam({
+          id: profile.id,
+          name: profile.name,
+          country: profile.country,
+          countryCode: code,
+          logo: profile.logo,
+          national: profile.national,
+        });
+        country = profile.country;
+        countryCode = code;
+        national = profile.national;
+        cacheName = profile.name;
+        cacheLogo = profile.logo;
+      }
+    } catch {
+      // Best-effort.
+    }
+  }
+
+  // Team genuinely doesn't exist if there are no watched matches AND nothing in cache/API resolved.
+  if (mine.length === 0 && !cacheName) return null;
 
   let name: string | null = null;
-  let crestUrl = `https://media.api-sports.io/football/teams/${teamId}.png`;
+  let crestUrl = cacheLogo ?? `https://media.api-sports.io/football/teams/${teamId}.png`;
   let wins = 0, draws = 0, losses = 0, gf = 0, ga = 0, mins = 0;
   const appearances: TeamMatchAppearance[] = [];
 
@@ -97,8 +156,11 @@ export function getTeamProfile(teamId: number): TeamProfile | null {
 
   return {
     teamId,
-    name: name ?? `Team ${teamId}`,
+    name: name ?? cacheName ?? `Team ${teamId}`,
     crestUrl,
+    country,
+    countryCode,
+    national,
     wins,
     draws,
     losses,

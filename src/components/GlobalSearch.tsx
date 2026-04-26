@@ -9,12 +9,12 @@ import type { SearchResponse } from "@/app/api/search/route";
 
 interface FlatRow {
   href: string;
-  group: "teams" | "players" | "competitions" | "stadiums" | "coaches" | "referees";
+  group: "teams" | "players" | "competitions" | "stadiums" | "coaches" | "referees" | "countries";
   label: string;
   sub: string | null;
   subCountryCode: string | null;
   icon: React.ReactNode;
-  source: "cache" | "api";
+  source: "cache" | "api" | "static";
 }
 
 function ResultIcon({ src, alt, isPlayer }: { src: string | null; alt: string; isPlayer?: boolean }) {
@@ -45,6 +45,17 @@ function StadiumIcon() {
         <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6" />
       </svg>
     </div>
+  );
+}
+
+function CountryFlagIcon({ code }: { code: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`https://flagcdn.com/${code}.svg`}
+      alt=""
+      className="w-6 h-4 object-cover rounded-sm shrink-0"
+    />
   );
 }
 
@@ -178,6 +189,15 @@ export default function GlobalSearch() {
           icon: <RefereeIcon />,
           source: r.source,
         })),
+        ...results.countries.map<FlatRow>((c) => ({
+          href: `/countries/${c.code}`,
+          group: "countries",
+          label: c.name,
+          sub: null,
+          subCountryCode: null,
+          icon: <CountryFlagIcon code={c.code} />,
+          source: c.source,
+        })),
       ]
     : [];
 
@@ -206,12 +226,13 @@ export default function GlobalSearch() {
   const showPanel = open && q.trim().length > 0;
   const totalHits = flat.length;
   const groupOrder: FlatRow["group"][] = [
-    "teams", "players", "competitions", "stadiums", "coaches", "referees",
+    "teams", "players", "competitions", "countries", "stadiums", "coaches", "referees",
   ];
   const groupLabels: Record<FlatRow["group"], string> = {
     teams: "Teams",
     players: "Players",
     competitions: "Competitions",
+    countries: "Countries",
     stadiums: "Stadiums",
     coaches: "Coaches",
     referees: "Referees",
@@ -238,7 +259,7 @@ export default function GlobalSearch() {
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder="Search teams, players, competitions, stadiums, coaches, referees…"
+          placeholder="Search teams, players, competitions, countries, stadiums, coaches, referees…"
           className="w-full bg-surface border border-card-border rounded-lg pl-9 pr-3 py-2 text-sm placeholder:text-muted focus:outline-none focus:border-accent"
         />
       </div>

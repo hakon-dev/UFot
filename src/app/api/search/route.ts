@@ -18,7 +18,7 @@ import {
   searchVenuesApi,
   searchCoachesApi,
 } from "@/lib/football-api";
-import { countryNameToCode } from "@/lib/country-codes";
+import { countryNameToCode, searchCountries } from "@/lib/country-codes";
 
 export interface TeamSearchHit {
   id: number;
@@ -74,6 +74,13 @@ export interface RefereeSearchHit {
   source: "cache";
 }
 
+// Countries come from the static country-codes map — no API, no cache, just substring match.
+export interface CountrySearchHit {
+  code: string;
+  name: string;
+  source: "static";
+}
+
 export interface SearchResponse {
   teams: TeamSearchHit[];
   players: PlayerSearchHit[];
@@ -81,6 +88,7 @@ export interface SearchResponse {
   stadiums: StadiumSearchHit[];
   coaches: CoachSearchHit[];
   referees: RefereeSearchHit[];
+  countries: CountrySearchHit[];
   liveError: string | null;
 }
 
@@ -103,7 +111,7 @@ export async function GET(request: NextRequest) {
   if (!q) {
     return NextResponse.json<SearchResponse>({
       teams: [], players: [], competitions: [], stadiums: [],
-      coaches: [], referees: [], liveError: null,
+      coaches: [], referees: [], countries: [], liveError: null,
     });
   }
 
@@ -155,6 +163,12 @@ export async function GET(request: NextRequest) {
     name: r.name,
     matches: r.matches,
     source: "cache",
+  }));
+  // Countries are just a substring match against the static country-codes map.
+  const countryHits: CountrySearchHit[] = searchCountries(q, PER_GROUP).map((c) => ({
+    code: c.code,
+    name: c.name,
+    source: "static",
   }));
 
   let liveError: string | null = null;
@@ -278,6 +292,7 @@ export async function GET(request: NextRequest) {
     stadiums: dedupeBy([...cacheStadiums, ...apiStadiums], (s) => s.id).slice(0, PER_GROUP),
     coaches: dedupeBy([...cacheCoaches, ...apiCoaches], (c) => c.id).slice(0, PER_GROUP),
     referees: cacheReferees.slice(0, PER_GROUP),
+    countries: countryHits,
     liveError,
   });
 }

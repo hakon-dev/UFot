@@ -7,7 +7,7 @@ import {
 } from "@/lib/db";
 import { codeToCountryName } from "@/lib/country-codes";
 import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
-import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
+import { classifyNationalTeam, enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
 import { aggregateCompetitions, aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
@@ -86,10 +86,25 @@ export default async function CountryPage({
     0
   );
 
-  // National teams from this country that the user has actually watched.
-  const watchedNationalTeams = nationalTeamRecords.filter((t) =>
-    allMatches.some((m) => m.home_team_id === t.id || m.away_team_id === t.id)
-  );
+  // National teams from this country, classified by gender + age group. API-Football names
+  // women's teams with a trailing " W" (e.g. "Norway W", "Norway U-21 W") and youth teams with
+  // "U-NN" (e.g. "Norway U-21"). The senior team has no age token. Men/women split into two
+  // columns; senior at top, then youth descending by age.
+  const classified = nationalTeamRecords.map((t) => {
+    const cls = classifyNationalTeam(t.name);
+    const watched = allMatches.some((m) => m.home_team_id === t.id || m.away_team_id === t.id);
+    return { ...t, gender: cls.gender, age: cls.age, watched };
+  });
+  // Senior (age=null) ranks ahead of any youth team; among youth, descending age.
+  function ageRank(a: { age: number | null }, b: { age: number | null }): number {
+    if (a.age === null && b.age === null) return 0;
+    if (a.age === null) return -1;
+    if (b.age === null) return 1;
+    return b.age - a.age;
+  }
+  const menTeams = classified.filter((t) => t.gender === "men").sort(ageRank);
+  const womenTeams = classified.filter((t) => t.gender === "women").sort(ageRank);
+  const hasNationalTeams = menTeams.length > 0 || womenTeams.length > 0;
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
   const sectionClass = "bg-card rounded-xl p-6 border border-card-border";
@@ -99,7 +114,7 @@ export default async function CountryPage({
     competitionStats.length > 0 ||
     playersFromCountry.length > 0 ||
     playersInCompetitions.length > 0 ||
-    watchedNationalTeams.length > 0;
+    hasNationalTeams;
 
   return (
     <div className="space-y-6">
@@ -117,7 +132,7 @@ export default async function CountryPage({
         Back to stats
       </Link>
 
-      <div className={cardClass}>
+      <div className={`${cardClass} border-sky-400/30`}>
         <div className="flex items-center gap-4 flex-wrap">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -126,6 +141,9 @@ export default async function CountryPage({
             className="w-16 h-12 object-cover rounded-md ring-1 ring-card-border"
           />
           <div className="flex-1 min-w-0">
+            <p className="text-[11px] uppercase tracking-[0.18em] font-semibold text-sky-300 mb-1">
+              Country
+            </p>
             <h1 className="text-2xl font-bold text-white">{countryName}</h1>
             <p className="text-sm text-muted mt-1">
               {clubMatches.length} club match{clubMatches.length === 1 ? "" : "es"} · {totalMinutesClubs.toLocaleString()} min
@@ -135,23 +153,6 @@ export default async function CountryPage({
                 </>
               )}
             </p>
-            {watchedNationalTeams.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {watchedNationalTeams.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/teams/${t.id}`}
-                    className="px-2.5 py-1 rounded-full bg-surface border border-card-border text-xs text-slate-200 hover:text-accent transition-colors inline-flex items-center gap-1.5"
-                  >
-                    {t.logo && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={t.logo} alt={t.name} className="w-4 h-4 object-contain" />
-                    )}
-                    National team: {t.name}
-                  </Link>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -162,6 +163,16 @@ export default async function CountryPage({
         </p>
       ) : (
         <>
+          {hasNationalTeams && (
+            <div className={sectionClass}>
+              <SectionHeader title="National teams" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <NationalTeamColumn title="Men" teams={menTeams} />
+                <NationalTeamColumn title="Women" teams={womenTeams} />
+              </div>
+            </div>
+          )}
+
           {teamStats.length > 0 && (
             <div className={sectionClass}>
               <SectionHeader title={`Clubs from ${countryName}`} seeAllHref={`/countries/${code}/clubs`} />
@@ -197,6 +208,49 @@ export default async function CountryPage({
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+interface NationalTeamRow {
+  id: number;
+  name: string;
+  logo: string | null;
+  age: number | null;
+  watched: boolean;
+}
+
+function NationalTeamColumn({ title, teams }: { title: string; teams: NationalTeamRow[] }) {
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-white mb-3">{title}</h3>
+      {teams.length === 0 ? (
+        <p className="text-xs text-muted">No {title.toLowerCase()} teams in cache yet.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {teams.map((t) => (
+            <Link
+              key={t.id}
+              href={`/teams/${t.id}`}
+              className="px-3 py-2 rounded-lg bg-surface border border-card-border text-sm text-slate-200 hover:text-accent transition-colors flex items-center gap-3"
+            >
+              {t.logo && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={t.logo} alt={t.name} className="w-6 h-6 object-contain shrink-0" />
+              )}
+              <span className="flex-1 truncate">{t.name}</span>
+              <span className="text-xs text-muted shrink-0">
+                {t.age === null ? "Senior" : `U-${t.age}`}
+              </span>
+              {!t.watched && (
+                <span className="text-[10px] uppercase tracking-wide text-muted border border-card-border rounded px-1.5 shrink-0">
+                  not watched
+                </span>
+              )}
+            </Link>
+          ))}
+        </div>
       )}
     </div>
   );

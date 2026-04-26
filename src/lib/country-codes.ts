@@ -187,3 +187,18 @@ export function flagUrl(code: string | null | undefined): string | null {
   if (!code) return null;
   return `https://flagcdn.com/${code}.svg`;
 }
+
+// Substring search over the canonical country names (one entry per code, so "USA"/"United States"
+// don't both show up). Case-insensitive; exact-prefix matches rank ahead of mid-string matches.
+export function searchCountries(q: string, limit = 6): { name: string; code: string }[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  const prefix: { name: string; code: string }[] = [];
+  const contains: { name: string; code: string }[] = [];
+  for (const [code, name] of Object.entries(CODE_TO_COUNTRY)) {
+    const lower = name.toLowerCase();
+    if (lower.startsWith(needle)) prefix.push({ name, code });
+    else if (lower.includes(needle)) contains.push({ name, code });
+  }
+  return [...prefix, ...contains].slice(0, limit);
+}

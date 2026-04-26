@@ -14,7 +14,7 @@ export default async function TeamPlayersPage({
   const { teamId } = await params;
   const idNum = parseInt(teamId, 10);
   if (!Number.isFinite(idNum)) notFound();
-  const team = getTeamProfile(idNum);
+  const team = await getTeamProfile(idNum);
   if (!team) notFound();
 
   const players = getTeamPlayers(idNum);
