@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { getCoachProfile } from "@/lib/coach-stats";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
+import RankLine from "@/components/RankLine";
+import { getCoachRank } from "@/lib/rank";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,10 @@ export default async function CoachDetailPage({
   const idNum = parseInt(coachId, 10);
   if (!Number.isFinite(idNum)) notFound();
 
-  const profile = await getCoachProfile(idNum);
+  const [profile, rankItems] = await Promise.all([
+    getCoachProfile(idNum),
+    getCoachRank(idNum),
+  ]);
   if (!profile || profile.totalMatches === 0) notFound();
 
   const items: PagedMatchItem[] = profile.appearances.map((a) => ({
@@ -83,6 +88,7 @@ export default async function CoachDetailPage({
                 <p className="mt-1 text-sm text-muted">{profile.nationality}</p>
               )
             )}
+            <RankLine items={rankItems} />
           </div>
         </div>
       </div>

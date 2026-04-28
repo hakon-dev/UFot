@@ -7,6 +7,8 @@ import {
 import PlayerPhoto from "./PlayerPhoto";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
+import RankLine from "@/components/RankLine";
+import { getPlayerRank } from "@/lib/rank";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +22,10 @@ export default async function PlayerPage({
   if (!Number.isFinite(idNum)) notFound();
 
   const profile = getPlayerProfile(idNum);
-  const [header, transfers] = await Promise.all([
+  const [header, transfers, rankItems] = await Promise.all([
     getPlayerHeader(idNum, profile),
     getPlayerTransferHistory(idNum),
+    getPlayerRank(idNum),
   ]);
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
@@ -46,6 +49,7 @@ export default async function PlayerPage({
                 ? `${profile.totalMatches} match${profile.totalMatches === 1 ? "" : "es"} watched`
                 : "No watched appearances yet."}
             </p>
+            <RankLine items={rankItems} />
             <HeaderChips header={header} />
           </div>
         </div>

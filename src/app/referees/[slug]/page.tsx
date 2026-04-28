@@ -4,6 +4,8 @@ import { getMatchesByRefereeName } from "@/lib/db";
 import { buildRefereeProfile } from "@/lib/coach-stats";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
+import RankLine from "@/components/RankLine";
+import { getRefereeRank } from "@/lib/rank";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,8 @@ export default async function RefereeDetailPage({
   const matches = getMatchesByRefereeName(name);
   const profile = buildRefereeProfile(name, matches);
   if (!profile) notFound();
+
+  const rankItems = getRefereeRank(name);
 
   const inPersonCount = profile.appearances.filter((a) => a.watchedInPerson).length;
   const first = profile.appearances[profile.appearances.length - 1];
@@ -54,6 +58,7 @@ export default async function RefereeDetailPage({
       <div className={cardClass}>
         <h1 className="text-2xl font-bold text-white">{profile.name}</h1>
         <p className="text-sm text-muted mt-1">Referee</p>
+        <RankLine items={rankItems} />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">

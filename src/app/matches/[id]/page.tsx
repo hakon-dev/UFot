@@ -1,4 +1,6 @@
-import { getMatch, getCoaches } from "@/lib/db";
+import { getMatch, getCoaches, setMatchVenueId } from "@/lib/db";
+import { hydrateMatchDetails } from "@/lib/match-hydration";
+import { searchVenuesApi } from "@/lib/football-api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import MatchDetailClient from "./MatchDetailClient";
@@ -12,8 +14,46 @@ export default async function MatchDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const match = getMatch(id);
+  let match = getMatch(id);
   if (!match) notFound();
+
+  // Older api-football rows predate the v10 venue backfill — hydrate inline so the venue
+  // chip renders as a working link on the first page load instead of waiting for the
+  // client-side details fetch to populate the cache.
+  if (
+    match.venue_id == null &&
+    match.external_source === "api-football" &&
+    match.external_match_id != null &&
+    !match.details_complete
+  ) {
+    await hydrateMatchDetails(id);
+    match = getMatch(id) ?? match;
+  }
+
+  // API-Football's fixture payload sometimes carries `venue.name` with `venue.id = null` (the
+  // venue isn't in their indexed venues database). Fall back to a `/venues?search=` lookup so
+  // the chip still becomes a clickable link. `venue_search_attempted` records the attempt so a
+  // null result doesn't burn a fresh API call on every page view.
+  if (
+    match.venue &&
+    match.venue_id == null &&
+    !match.venue_search_attempted &&
+    match.external_source === "api-football"
+  ) {
+    try {
+      const hits = await searchVenuesApi(match.venue);
+      const wanted = match.venue.toLowerCase();
+      const best =
+        hits.find((v) => v.name.toLowerCase() === wanted) ??
+        hits.find((v) => v.name.toLowerCase().includes(wanted)) ??
+        hits[0] ??
+        null;
+      setMatchVenueId(id, best?.id ?? null);
+      match = getMatch(id) ?? match;
+    } catch {
+      // best-effort — don't mark attempted on transient error so the next view can retry.
+    }
+  }
 
   const dateStr = new Date(match.date).toLocaleDateString("en-GB", {
     weekday: "long",
@@ -103,20 +143,20 @@ export default async function MatchDetailPage({
           )}
           {match.round && <span>{match.round}</span>}
           {match.venue && (
-            match.venue_id != null ? (
-              <Link
-                href={`/stadiums/${match.venue_id}`}
-                className="hover:text-accent transition-colors"
-              >
-                {match.venue}
-                {match.venue_city ? ` · ${match.venue_city}` : ""}
-              </Link>
-            ) : (
+            <Link
+              href={
+                match.venue_id != null
+                  ? `/stadiums/${match.venue_id}`
+                  : `/stadiums/by-name/${encodeURIComponent(match.venue)}`
+              }
+              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-card-border bg-surface text-slate-200 hover:text-accent hover:border-accent/40 transition-colors"
+            >
+              <StadiumIcon />
               <span>
                 {match.venue}
                 {match.venue_city ? ` · ${match.venue_city}` : ""}
               </span>
-            )
+            </Link>
           )}
           {match.referee_name && (
             <Link
@@ -207,4 +247,21 @@ function TeamSide({
     );
   }
   return <div className={wrapper}>{inner}</div>;
+}
+
+function StadiumIcon() {
+  return (
+    <svg
+      className="w-3.5 h-3.5 shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 22s7-7.5 7-13a7 7 0 1 0-14 0c0 5.5 7 13 7 13z" />
+      <circle cx="12" cy="9" r="2.5" />
+    </svg>
+  );
 }

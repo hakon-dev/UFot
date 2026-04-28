@@ -1,31 +1,29 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getMatchesByVenueId } from "@/lib/db";
+import { getMatchesByVenueName } from "@/lib/db";
 import { minutesOf } from "@/lib/stats-aggregation";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
-import RankLine from "@/components/RankLine";
-import { getStadiumRank } from "@/lib/rank";
 
 export const dynamic = "force-dynamic";
 
-export default async function StadiumDetailPage({
+// Fallback stadium page keyed on the free-text venue name. Used when API-Football didn't
+// return a venue.id for a fixture and a /venues?search= lookup couldn't resolve one either —
+// the chip on /matches/[id] still needs to be clickable so the user can see "other matches I
+// watched here". Mirrors the structure of /stadiums/[venueId] but skips the venue-id
+// see-all link (no id to thread through).
+export default async function StadiumByNamePage({
   params,
 }: {
-  params: Promise<{ venueId: string }>;
+  params: Promise<{ name: string }>;
 }) {
-  const { venueId } = await params;
-  const idNum = parseInt(venueId, 10);
-  if (!Number.isFinite(idNum)) notFound();
-
-  const matches = getMatchesByVenueId(idNum);
+  const { name } = await params;
+  const venueName = decodeURIComponent(name);
+  const matches = getMatchesByVenueName(venueName);
   if (matches.length === 0) notFound();
-
-  const rankItems = getStadiumRank(idNum);
 
   const first = matches[matches.length - 1];
   const latest = matches[0];
-  const venueName = matches.find((m) => m.venue)?.venue || "Unknown";
   const venueCity = matches.find((m) => m.venue_city)?.venue_city ?? null;
 
   let totalMinutes = 0;
@@ -72,7 +70,6 @@ export default async function StadiumDetailPage({
       <div className={cardClass}>
         <h1 className="text-2xl font-bold text-white">{venueName}</h1>
         {venueCity && <p className="text-sm text-muted mt-1">{venueCity}</p>}
-        <RankLine items={rankItems} />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -85,7 +82,7 @@ export default async function StadiumDetailPage({
       </div>
 
       <div className={cardClass}>
-        <SectionHeader title="Matches Watched Here" seeAllHref={`/stadiums/${idNum}/matches`} />
+        <SectionHeader title="Matches Watched Here" />
         <PagedMatchList items={items} pageSize={10} />
       </div>
     </div>
