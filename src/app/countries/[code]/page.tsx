@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  getCoachAggregates,
+  getCoaches,
   getCompetitionsByCountryCode,
   getMatchesWithDetails,
   getTeamsByCountryCode,
@@ -9,10 +11,13 @@ import { codeToCountryName } from "@/lib/country-codes";
 import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import { classifyNationalTeam, enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
+import { enrichCoachAggregatesWithNationality } from "@/lib/coach-stats";
 import { aggregateCompetitions, aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
+import { pickDefaultGender } from "@/lib/gender";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 import TeamStatsTable from "@/app/stats/TeamStatsTable";
 import CompetitionStatsTable from "@/app/stats/CompetitionStatsTable";
+import CoachStatsTable, { type CoachStat } from "@/app/coaches/CoachStatsTable";
 import SectionHeader from "@/components/SectionHeader";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +43,17 @@ export default async function CountryPage({
   const competitionNames = new Set<string>(competitionsFromCountry.map((c) => c.name));
 
   const allMatches = getMatchesWithDetails();
+  // Pick a default based on this country's club + competition matches so the page opens
+  // populated rather than empty when the user mostly watches the opposite gender globally.
+  const defaultGender = pickDefaultGender([
+    ...allMatches.filter(
+      (m) =>
+        (m.home_team_id != null && clubIds.has(m.home_team_id)) ||
+        (m.away_team_id != null && clubIds.has(m.away_team_id)) ||
+        (m.competition_id != null && competitionIds.has(m.competition_id)) ||
+        (m.competition_id == null && m.competition && competitionNames.has(m.competition))
+    ),
+  ]);
 
   // Matches involving any club from this country (national teams excluded — their matches still
   // show under the national-team page, but the "clubs from this country" rollup is club-only).
@@ -80,6 +96,30 @@ export default async function CountryPage({
     return stats;
   })();
 
+  // Coaches whose nationality matches this country. Mirrors the players-from-country logic —
+  // enrich for nationality, then filter against the coach cache by country code.
+  const coachAggregates = getCoachAggregates();
+  await enrichCoachAggregatesWithNationality(coachAggregates);
+  const coachCache = getCoaches(coachAggregates.map((a) => a.coachId));
+  const coachesFromCountry: CoachStat[] = coachAggregates
+    .map((a) => {
+      const cache = coachCache.get(a.coachId);
+      return {
+        coachId: a.coachId,
+        name: cache?.name ?? a.name,
+        photo: a.photo ?? cache?.photo ?? null,
+        nationality: cache?.nationality ?? null,
+        countryCode: cache?.country_code ?? null,
+        matches: a.matches,
+        minutes: a.minutes,
+        wins: a.wins,
+        draws: a.draws,
+        losses: a.losses,
+        gender: a.gender,
+      };
+    })
+    .filter((c) => c.countryCode === code);
+
   const totalMinutesClubs = clubMatches.reduce((s, m) => s + minutesOf(m.watch_intervals), 0);
   const totalMinutesComps = competitionMatches.reduce(
     (s, m) => s + minutesOf(m.watch_intervals),
@@ -114,6 +154,7 @@ export default async function CountryPage({
     competitionStats.length > 0 ||
     playersFromCountry.length > 0 ||
     playersInCompetitions.length > 0 ||
+    coachesFromCountry.length > 0 ||
     hasNationalTeams;
 
   return (
@@ -176,14 +217,14 @@ export default async function CountryPage({
           {teamStats.length > 0 && (
             <div className={sectionClass}>
               <SectionHeader title={`Clubs from ${countryName}`} seeAllHref={`/countries/${code}/clubs`} />
-              <TeamStatsTable teams={teamStats} pageSize={10} />
+              <TeamStatsTable teams={teamStats} pageSize={10} defaultGender={defaultGender} />
             </div>
           )}
 
           {competitionStats.length > 0 && (
             <div className={sectionClass}>
               <SectionHeader title={`Competitions from ${countryName}`} seeAllHref={`/countries/${code}/competitions`} />
-              <CompetitionStatsTable competitions={competitionStats} pageSize={10} />
+              <CompetitionStatsTable competitions={competitionStats} pageSize={10} defaultGender={defaultGender} />
             </div>
           )}
 
@@ -193,7 +234,7 @@ export default async function CountryPage({
               <p className="text-xs text-muted mb-4">
                 Players whose nationality is {countryName}, across every match you&apos;ve watched.
               </p>
-              <PlayerStatsTable players={playersFromCountry} pageSize={10} />
+              <PlayerStatsTable players={playersFromCountry} pageSize={10} defaultGender={defaultGender} />
             </div>
           )}
 
@@ -204,7 +245,14 @@ export default async function CountryPage({
                 Anyone you&apos;ve watched playing in a competition based in {countryName}, regardless
                 of nationality.
               </p>
-              <PlayerStatsTable players={playersInCompetitions} pageSize={10} />
+              <PlayerStatsTable players={playersInCompetitions} pageSize={10} defaultGender={defaultGender} />
+            </div>
+          )}
+
+          {coachesFromCountry.length > 0 && (
+            <div className={sectionClass}>
+              <SectionHeader title={`Coaches from ${countryName}`} seeAllHref={`/countries/${code}/coaches`} />
+              <CoachStatsTable coaches={coachesFromCountry} pageSize={10} defaultGender={defaultGender} />
             </div>
           )}
         </>

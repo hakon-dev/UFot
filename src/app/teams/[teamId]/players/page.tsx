@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTeamProfile, getTeamPlayers } from "@/lib/team-stats";
 import { enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
+import { classifyTeamGender } from "@/lib/gender";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ export default async function TeamPlayersPage({
       <h1 className="text-2xl font-bold text-white">{team.name} — All Players Watched</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <PlayerStatsTable players={players} pageSize={null} />
+        <PlayerStatsTable players={players} pageSize={null} defaultGender={classifyTeamGender(team.name)} />
       </div>
     </div>
   );

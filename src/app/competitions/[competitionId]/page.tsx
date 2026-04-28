@@ -5,10 +5,13 @@ import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStats
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { isRegionName, resolveCompetitionRegion } from "@/lib/competition-stats";
 import { aggregateTeams, minutesOf } from "@/lib/stats-aggregation";
+import { pickDefaultGender } from "@/lib/gender";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 import TeamStatsTable from "@/app/stats/TeamStatsTable";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
+import RankLine from "@/components/RankLine";
+import { getCompetitionRank } from "@/lib/rank";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +46,7 @@ export default async function CompetitionPage({
 
   if (matches.length === 0) notFound();
 
+  const defaultGender = pickDefaultGender(matches);
   const totalMinutes = matches.reduce((s, m) => s + minutesOf(m.watch_intervals), 0);
 
   const teams = aggregateTeams(matches);
@@ -51,6 +55,8 @@ export default async function CompetitionPage({
   const players = computePlayerStats(matches);
   await enrichPlayerStatsWithNationality(players);
   await enrichPlayerStatsWithClub(players);
+
+  const rankItems = await getCompetitionRank(idNum);
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
   const sectionClass = "bg-card rounded-xl p-6 border border-card-border";
@@ -81,6 +87,7 @@ export default async function CompetitionPage({
             <p className="text-sm text-muted mt-1">
               {matches.length} match{matches.length === 1 ? "" : "es"} watched · {totalMinutes.toLocaleString()} min
             </p>
+            <RankLine items={rankItems} />
             {region.country && (
               <div className="mt-2">
                 {regionIsRegion ? (
@@ -128,13 +135,13 @@ export default async function CompetitionPage({
 
       <div className={sectionClass}>
         <SectionHeader title="Most Watched Teams" seeAllHref={`/competitions/${idNum}/teams`} />
-        <TeamStatsTable teams={teams} pageSize={10} />
+        <TeamStatsTable teams={teams} pageSize={10} defaultGender={defaultGender} />
       </div>
 
       {players.length > 0 && (
         <div className={sectionClass}>
           <SectionHeader title="Most Watched Players" seeAllHref={`/competitions/${idNum}/players`} />
-          <PlayerStatsTable players={players} pageSize={10} />
+          <PlayerStatsTable players={players} pageSize={10} defaultGender={defaultGender} />
         </div>
       )}
 

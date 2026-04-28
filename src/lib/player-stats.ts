@@ -6,6 +6,7 @@ import {
 } from "./db";
 import { countryNameToCode } from "./country-codes";
 import { fetchPlayerProfile, fetchPlayerTransfers, fetchPlayerCurrentTeam, fetchTeamProfile } from "./football-api";
+import { matchGender } from "./gender";
 
 export interface PlayerStat {
   playerId: number | null;
@@ -21,6 +22,7 @@ export interface PlayerStat {
   clubCrest: string | null;
   nationality: string | null;
   countryCode: string | null;
+  gender: "men" | "women";
 }
 
 type MatchWithDetails = Match & {
@@ -157,9 +159,20 @@ export function computePlayerStats(
       playerId: resolvedId, name, minutesWatched: 0, matches: 0, goalsWatched: 0, assistsWatched: 0,
       yellowsWatched: 0, redsWatched: 0,
       club: null, clubId: null, clubCrest: null, nationality: null, countryCode: null,
+      gender: "men",
     };
     stats.set(key, s);
     return s;
+  }
+
+  // Tally a player's appearances by match gender so the final pick is whichever side
+  // accounts for more of their watched minutes. Keyed by stat reference (not key string)
+  // because orphan-resolution moves the stat object between map keys (name:X → id:N).
+  const genderTally = new Map<PlayerStat, { men: number; women: number }>();
+  function recordGender(s: PlayerStat, mins: number, g: "men" | "women") {
+    const t = genderTally.get(s) ?? { men: 0, women: 0 };
+    t[g] += mins;
+    genderTally.set(s, t);
   }
 
   function recordClub(
@@ -230,6 +243,7 @@ export function computePlayerStats(
         const stat = ensure(lineup.player_id, lineup.player_name);
         stat.minutesWatched += overlap;
         stat.matches += 1;
+        recordGender(stat, overlap, matchGender(match.home_team, match.away_team));
 
         const isHome = lineup.team === "home";
         recordClub(
@@ -315,6 +329,15 @@ export function computePlayerStats(
         existing.yellowsWatched += s.yellowsWatched;
         existing.redsWatched += s.redsWatched;
         if (resolved.name.length > existing.name.length) existing.name = resolved.name;
+        // Merge gender tallies as well — without this the orphan's appearances are dropped.
+        const orphanT = genderTally.get(s);
+        if (orphanT) {
+          const existingT = genderTally.get(existing) ?? { men: 0, women: 0 };
+          existingT.men += orphanT.men;
+          existingT.women += orphanT.women;
+          genderTally.set(existing, existingT);
+          genderTally.delete(s);
+        }
         stats.delete(oldKey);
       } else {
         s.playerId = resolved.id;
@@ -323,6 +346,12 @@ export function computePlayerStats(
         stats.set(newKey, s);
       }
     }
+  }
+
+  // Resolve each player's gender from their tally now that orphan-merging is done.
+  for (const stat of stats.values()) {
+    const t = genderTally.get(stat);
+    if (t) stat.gender = t.women > t.men ? "women" : "men";
   }
 
   return [...stats.values()].sort((a, b) => b.minutesWatched - a.minutesWatched);

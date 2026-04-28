@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { getMatchesWithDetails } from "@/lib/db";
+import { getAllMatches, getMatchesWithDetails } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
 import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
+import { pickDefaultGender } from "@/lib/gender";
 import PlayerStatsTable from "../PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function AllPlayersStatsPage() {
   await hydratePendingMatches(5);
 
+  const defaultGender = pickDefaultGender(getAllMatches());
   const matchesWithDetails = getMatchesWithDetails();
   const playerStats = computePlayerStats(matchesWithDetails);
   await enrichPlayerStatsWithNationality(playerStats);
@@ -30,7 +32,7 @@ export default async function AllPlayersStatsPage() {
         {playerStats.length === 0 ? (
           <p className="text-muted text-center py-8">No players yet.</p>
         ) : (
-          <PlayerStatsTable players={playerStats} pageSize={null} />
+          <PlayerStatsTable players={playerStats} pageSize={null} defaultGender={defaultGender} />
         )}
       </div>
     </div>

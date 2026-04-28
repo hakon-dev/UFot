@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { getRefereeAggregates } from "@/lib/db";
+import { getAllMatches, getRefereeAggregates } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
+import { pickDefaultGender } from "@/lib/gender";
 import RefereeStatsTable, { type RefereeStat } from "./RefereeStatsTable";
 import SectionHeader from "@/components/SectionHeader";
 
@@ -9,11 +10,13 @@ export const dynamic = "force-dynamic";
 export default async function RefereesPage() {
   await hydratePendingMatches(5);
 
+  const defaultGender = pickDefaultGender(getAllMatches());
   const aggregates = getRefereeAggregates();
   const rows: RefereeStat[] = aggregates.map((a) => ({
     name: a.name,
     matches: a.matches,
     minutes: a.minutes,
+    gender: a.gender,
   }));
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
@@ -36,7 +39,7 @@ export default async function RefereesPage() {
 
       <div className={cardClass}>
         <SectionHeader title="Most Watched Referees" seeAllHref="/referees/total" />
-        <RefereeStatsTable referees={rows} pageSize={10} />
+        <RefereeStatsTable referees={rows} pageSize={10} defaultGender={defaultGender} />
       </div>
     </div>
   );

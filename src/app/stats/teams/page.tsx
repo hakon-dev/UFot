@@ -3,6 +3,7 @@ import { getAllMatches } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { aggregateTeams } from "@/lib/stats-aggregation";
+import { pickDefaultGender } from "@/lib/gender";
 import TeamStatsTable from "../TeamStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export default async function AllTeamsStatsPage() {
   await hydratePendingMatches(5);
 
   const matches = getAllMatches();
+  const defaultGender = pickDefaultGender(matches);
   const teams = aggregateTeams(matches);
   await enrichTeamRecordsWithCountry(teams);
 
@@ -30,7 +32,7 @@ export default async function AllTeamsStatsPage() {
         {teams.length === 0 ? (
           <p className="text-muted text-center py-8">No teams yet.</p>
         ) : (
-          <TeamStatsTable teams={teams} pageSize={null} />
+          <TeamStatsTable teams={teams} pageSize={null} defaultGender={defaultGender} />
         )}
       </div>
     </div>

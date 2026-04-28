@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { HeaderButton, Pagination, usePagedRows, type SortDir } from "@/app/stats/_components/TableUtils";
+import {
+  GenderToggle, HeaderButton, Pagination, usePagedRows,
+  type GenderFilter, type SortDir,
+} from "@/app/stats/_components/TableUtils";
 
 export interface RefereeStat {
   name: string;
   matches: number;
   minutes: number;
+  gender: "men" | "women";
 }
 
 type SortKey = "name" | "minutes" | "matches";
@@ -23,13 +27,16 @@ function compare(a: RefereeStat, b: RefereeStat, key: SortKey, dir: SortDir): nu
 export default function RefereeStatsTable({
   referees,
   pageSize = 10,
+  defaultGender = "men",
 }: {
   referees: RefereeStat[];
   pageSize?: number | null;
+  defaultGender?: "men" | "women";
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [gender, setGender] = useState<GenderFilter>(defaultGender);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -41,15 +48,16 @@ export default function RefereeStatsTable({
 
   const processed = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const filtered = q ? referees.filter((r) => r.name.toLowerCase().includes(q)) : referees;
+    const byGender = gender === "total" ? referees : referees.filter((r) => r.gender === gender);
+    const filtered = q ? byGender.filter((r) => r.name.toLowerCase().includes(q)) : byGender;
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [referees, filter, sortKey, sortDir]);
+  }, [referees, filter, sortKey, sortDir, gender]);
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
-      <div className="mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="text"
           value={filter}
@@ -57,6 +65,7 @@ export default function RefereeStatsTable({
           placeholder="Filter by name…"
           className="w-full sm:max-w-xs bg-surface border border-card-border rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
         />
+        <GenderToggle value={gender} onChange={setGender} />
       </div>
 
       <div className="overflow-x-auto">

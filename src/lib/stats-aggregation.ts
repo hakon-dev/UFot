@@ -1,6 +1,7 @@
 import type { Match } from "./db";
 import type { CompetitionStat } from "@/app/stats/CompetitionStatsTable";
 import type { TeamStat } from "@/app/stats/TeamStatsTable";
+import { classifyTeamGender, matchGender } from "./gender";
 
 export function minutesOf(rawIntervals: string | null): number {
   try {
@@ -16,9 +17,12 @@ export function aggregateCompetitions(matches: Match[]): CompetitionStat[] {
   // competition that do carry an ID. Promote the ID whenever any match in the group has one,
   // so the enrichment step can still fetch logo/country for the merged entry.
   const map = new Map<string, CompetitionStat>();
+  // Track gendered minutes per competition so we can pick the dominant gender at the end.
+  const genderMinutes = new Map<string, { men: number; women: number }>();
   for (const m of matches) {
     const name = m.competition || "Unknown";
     const mins = minutesOf(m.watch_intervals);
+    const g = matchGender(m.home_team, m.away_team);
     const existing = map.get(name);
     if (existing) {
       existing.matches += 1;
@@ -35,8 +39,16 @@ export function aggregateCompetitions(matches: Match[]): CompetitionStat[] {
         countryCode: null,
         matches: 1,
         minutes: mins,
+        gender: "men",
       });
     }
+    const gm = genderMinutes.get(name) ?? { men: 0, women: 0 };
+    gm[g] += mins;
+    genderMinutes.set(name, gm);
+  }
+  for (const [name, stat] of map) {
+    const gm = genderMinutes.get(name);
+    stat.gender = gm && gm.women > gm.men ? "women" : "men";
   }
   return [...map.values()];
 }
@@ -53,10 +65,12 @@ export function aggregateTeams(matches: Match[]): TeamStat[] {
         crest,
         country: null,
         countryCode: null,
+        national: null,
         matches: 0,
         minutes: 0,
         goalsFor: 0,
         goalsAgainst: 0,
+        gender: classifyTeamGender(name),
       };
       map.set(name, rec);
     } else {

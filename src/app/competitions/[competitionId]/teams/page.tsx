@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getCompetition, getMatchesWithDetails } from "@/lib/db";
 import { aggregateTeams } from "@/lib/stats-aggregation";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
+import { pickDefaultGender } from "@/lib/gender";
 import TeamStatsTable from "@/app/stats/TeamStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export default async function CompetitionTeamsPage({
       <h1 className="text-2xl font-bold text-white">{competition.name} — All Teams Watched</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <TeamStatsTable teams={teams} pageSize={null} />
+        <TeamStatsTable teams={teams} pageSize={null} defaultGender={pickDefaultGender(matches)} />
       </div>
     </div>
   );

@@ -2,9 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { classifyNationalTeam, getTeamProfile, getTeamPlayers } from "@/lib/team-stats";
 import { enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
+import { classifyTeamGender } from "@/lib/gender";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
+import RankLine from "@/components/RankLine";
+import { getTeamRank } from "@/lib/rank";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +19,10 @@ export default async function TeamPage({
   const { teamId } = await params;
   const idNum = parseInt(teamId, 10);
   if (!Number.isFinite(idNum)) notFound();
-  const team = await getTeamProfile(idNum);
+  const [team, rankItems] = await Promise.all([
+    getTeamProfile(idNum),
+    getTeamRank(idNum),
+  ]);
   if (!team) notFound();
 
   const classification = team.national ? classifyNationalTeam(team.name) : null;
@@ -61,6 +67,7 @@ export default async function TeamPage({
             <p className="text-sm text-muted">
               {team.totalMatches} match{team.totalMatches === 1 ? "" : "es"} watched
             </p>
+            <RankLine items={rankItems} />
           </div>
         </div>
       </div>
@@ -108,7 +115,7 @@ export default async function TeamPage({
           {teamPlayers.length > 0 && (
             <div className={cardClass}>
               <SectionHeader title="Most Watched Players" seeAllHref={`/teams/${idNum}/players`} />
-              <PlayerStatsTable players={teamPlayers} pageSize={10} />
+              <PlayerStatsTable players={teamPlayers} pageSize={10} defaultGender={classifyTeamGender(team.name)} />
             </div>
           )}
 

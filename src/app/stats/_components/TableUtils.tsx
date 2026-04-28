@@ -65,6 +65,46 @@ export function usePagedRows<T>(
   return { page, setPage, pageCount, visible, startIndex };
 }
 
+export type GenderFilter = "men" | "women" | "total";
+
+// Three-segment toggle used above every stats table to swap between men's, women's, and the
+// combined total. Filtering happens in the parent component — this is just the visual chip.
+export function GenderToggle({
+  value,
+  onChange,
+}: {
+  value: GenderFilter;
+  onChange: (next: GenderFilter) => void;
+}) {
+  const segments: { key: GenderFilter; label: string }[] = [
+    { key: "men", label: "Men" },
+    { key: "women", label: "Women" },
+    { key: "total", label: "Total" },
+  ];
+  return (
+    <div className="inline-flex rounded-lg border border-card-border bg-surface p-0.5 text-xs">
+      {segments.map((s) => {
+        const active = s.key === value;
+        return (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => onChange(s.key)}
+            className={`px-2.5 py-1 rounded-md transition-colors ${
+              active
+                ? "bg-accent text-black font-semibold"
+                : "text-slate-300 hover:text-accent"
+            }`}
+            aria-pressed={active}
+          >
+            {s.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Pagination({
   page,
   pageCount,

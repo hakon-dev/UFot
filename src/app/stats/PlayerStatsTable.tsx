@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { HeaderButton, Pagination, usePagedRows, type SortDir } from "./_components/TableUtils";
+import {
+  GenderToggle, HeaderButton, Pagination, usePagedRows,
+  type GenderFilter, type SortDir,
+} from "./_components/TableUtils";
 
 interface PlayerStat {
   playerId: number | null;
@@ -18,6 +21,7 @@ interface PlayerStat {
   clubCrest: string | null;
   nationality: string | null;
   countryCode: string | null;
+  gender: "men" | "women";
 }
 
 type SortKey =
@@ -168,13 +172,16 @@ function compare(a: PlayerStat, b: PlayerStat, key: SortKey, dir: SortDir): numb
 export default function PlayerStatsTable({
   players,
   pageSize = 10,
+  defaultGender = "men",
 }: {
   players: PlayerStat[];
   pageSize?: number | null;
+  defaultGender?: "men" | "women";
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutesWatched");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [gender, setGender] = useState<GenderFilter>(defaultGender);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -187,22 +194,23 @@ export default function PlayerStatsTable({
 
   const processed = useMemo(() => {
     const q = filter.trim().toLowerCase();
+    const byGender = gender === "total" ? players : players.filter((p) => p.gender === gender);
     const filtered = q
-      ? players.filter(
+      ? byGender.filter(
           (p) =>
             p.name.toLowerCase().includes(q) ||
             (p.club?.toLowerCase().includes(q) ?? false) ||
             (p.nationality?.toLowerCase().includes(q) ?? false)
         )
-      : players;
+      : byGender;
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [players, filter, sortKey, sortDir]);
+  }, [players, filter, sortKey, sortDir, gender]);
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
-      <div className="mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="text"
           value={filter}
@@ -210,6 +218,7 @@ export default function PlayerStatsTable({
           placeholder="Filter by name, club, or nationality…"
           className="w-full sm:max-w-xs bg-surface border border-card-border rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
         />
+        <GenderToggle value={gender} onChange={setGender} />
       </div>
 
       <div className="overflow-x-auto">

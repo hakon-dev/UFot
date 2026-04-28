@@ -4,6 +4,7 @@ import { getMatchesWithDetails, getTeamsByCountryCode } from "@/lib/db";
 import { codeToCountryName } from "@/lib/country-codes";
 import { enrichTeamRecordsWithCountry } from "@/lib/team-stats";
 import { aggregateTeams } from "@/lib/stats-aggregation";
+import { pickDefaultGender } from "@/lib/gender";
 import TeamStatsTable from "@/app/stats/TeamStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +48,7 @@ export default async function CountryClubsPage({
       <h1 className="text-2xl font-bold text-white">Clubs from {countryName}</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <TeamStatsTable teams={teamStats} pageSize={null} />
+        <TeamStatsTable teams={teamStats} pageSize={null} defaultGender={pickDefaultGender(clubMatches)} />
       </div>
     </div>
   );

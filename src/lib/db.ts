@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import crypto from "crypto";
+import { matchGender, type Gender } from "./gender";
 
 const dbPath = path.join(process.cwd(), "data", "ufot.db");
 const db = new Database(dbPath);
@@ -109,6 +110,12 @@ if (!columnNames.includes("away_coach_name")) {
 // `details_complete=0` keeps it on the rescue loop.
 if (!columnNames.includes("details_complete")) {
   db.exec("ALTER TABLE matches ADD COLUMN details_complete INTEGER DEFAULT 0");
+}
+// Marks that we already attempted a `/venues?search=` lookup for this match's free-text venue
+// name. Set after the lookup runs even when no result was found, so the page doesn't burn an
+// API call on every view of a match whose venue API-Football doesn't have indexed.
+if (!columnNames.includes("venue_search_attempted")) {
+  db.exec("ALTER TABLE matches ADD COLUMN venue_search_attempted INTEGER DEFAULT 0");
 }
 
 // Detail tables
@@ -421,6 +428,7 @@ export interface Match {
   home_coach_name: string | null;
   away_coach_id: number | null;
   away_coach_name: string | null;
+  venue_search_attempted: number;
 }
 
 export interface MatchGoal {
@@ -536,10 +544,30 @@ export function updateMatchWatchedInPerson(matchId: string, watched: boolean): v
   db.prepare("UPDATE matches SET watched_in_person = ? WHERE id = ?").run(watched ? 1 : 0, matchId);
 }
 
+// Set the resolved venue id for a match (from a `/venues?search=` lookup) and mark the lookup
+// as attempted in one go. Always flips `venue_search_attempted=1` so a null result still
+// blocks future retries.
+export function setMatchVenueId(matchId: string, venueId: number | null): void {
+  db.prepare(
+    "UPDATE matches SET venue_id = COALESCE(?, venue_id), venue_search_attempted = 1 WHERE id = ?"
+  ).run(venueId, matchId);
+}
+
 export function getMatchesByVenueId(venueId: number): Match[] {
   return db
     .prepare("SELECT * FROM matches WHERE venue_id = ? ORDER BY date DESC, created_at DESC")
     .all(venueId) as Match[];
+}
+
+// Name-based fallback for venues that API-Football didn't return an id for (and our
+// `/venues?search=` lookup couldn't resolve either). Case-insensitive exact match on the
+// free-text `venue` column so manual entries and api-rows-without-id both surface here.
+export function getMatchesByVenueName(venueName: string): Match[] {
+  return db
+    .prepare(
+      "SELECT * FROM matches WHERE LOWER(venue) = LOWER(?) ORDER BY date DESC, created_at DESC"
+    )
+    .all(venueName) as Match[];
 }
 
 export interface StadiumAggregate {
@@ -552,6 +580,7 @@ export interface StadiumAggregate {
   inPersonMinutes: number;
   firstVisit: string | null;
   lastVisit: string | null;
+  gender: Gender;
 }
 
 // Local-cache search. LIKE %q% on each table; case-insensitive via LOWER(). Limits are small
@@ -653,6 +682,7 @@ export interface CoachAggregate {
   losses: number;
   firstMatch: string | null;
   lastMatch: string | null;
+  gender: Gender;
 }
 
 export interface RefereeAggregate {
@@ -661,6 +691,7 @@ export interface RefereeAggregate {
   minutes: number;
   firstMatch: string | null;
   lastMatch: string | null;
+  gender: Gender;
 }
 
 // Walk every match with coach data and accumulate per-coach totals. A coach can show up on the
@@ -671,13 +702,15 @@ export interface RefereeAggregate {
 export function getCoachAggregates(): CoachAggregate[] {
   const rows = db
     .prepare(
-      `SELECT id, home_score, away_score, home_coach_id, home_coach_name,
+      `SELECT id, home_team, away_team, home_score, away_score, home_coach_id, home_coach_name,
               away_coach_id, away_coach_name, watch_intervals, date
        FROM matches
        WHERE home_coach_id IS NOT NULL OR away_coach_id IS NOT NULL`
     )
     .all() as Array<{
       id: string;
+      home_team: string;
+      away_team: string;
       home_score: number;
       away_score: number;
       home_coach_id: number | null;
@@ -689,6 +722,7 @@ export function getCoachAggregates(): CoachAggregate[] {
     }>;
 
   const map = new Map<number, CoachAggregate>();
+  const genderTally = new Map<number, { men: number; women: number }>();
 
   function tally(
     coachId: number | null,
@@ -697,7 +731,8 @@ export function getCoachAggregates(): CoachAggregate[] {
     homeScore: number,
     awayScore: number,
     minutes: number,
-    date: string
+    date: string,
+    g: Gender
   ): void {
     if (coachId == null || !coachName) return;
     let agg = map.get(coachId);
@@ -713,6 +748,7 @@ export function getCoachAggregates(): CoachAggregate[] {
         losses: 0,
         firstMatch: null,
         lastMatch: null,
+        gender: "men",
       };
       map.set(coachId, agg);
     }
@@ -723,6 +759,9 @@ export function getCoachAggregates(): CoachAggregate[] {
     else agg.losses += 1;
     if (!agg.firstMatch || date < agg.firstMatch) agg.firstMatch = date;
     if (!agg.lastMatch || date > agg.lastMatch) agg.lastMatch = date;
+    const t = genderTally.get(coachId) ?? { men: 0, women: 0 };
+    t[g] += minutes;
+    genderTally.set(coachId, t);
   }
 
   for (const r of rows) {
@@ -734,8 +773,9 @@ export function getCoachAggregates(): CoachAggregate[] {
       }
     })();
     const minutes = intervals.reduce((s, [a, b]) => s + (b - a), 0);
-    tally(r.home_coach_id, r.home_coach_name, "home", r.home_score, r.away_score, minutes, r.date);
-    tally(r.away_coach_id, r.away_coach_name, "away", r.home_score, r.away_score, minutes, r.date);
+    const g = matchGender(r.home_team, r.away_team);
+    tally(r.home_coach_id, r.home_coach_name, "home", r.home_score, r.away_score, minutes, r.date, g);
+    tally(r.away_coach_id, r.away_coach_name, "away", r.home_score, r.away_score, minutes, r.date, g);
   }
 
   // Backfill photos from the coaches cache so the table can render avatars.
@@ -751,19 +791,31 @@ export function getCoachAggregates(): CoachAggregate[] {
     }
   }
 
+  for (const [id, agg] of map) {
+    const t = genderTally.get(id);
+    if (t) agg.gender = t.women > t.men ? "women" : "men";
+  }
+
   return [...map.values()];
 }
 
 export function getRefereeAggregates(): RefereeAggregate[] {
   const rows = db
     .prepare(
-      `SELECT referee_name, watch_intervals, date
+      `SELECT referee_name, home_team, away_team, watch_intervals, date
        FROM matches
        WHERE referee_name IS NOT NULL AND TRIM(referee_name) <> ''`
     )
-    .all() as Array<{ referee_name: string; watch_intervals: string | null; date: string }>;
+    .all() as Array<{
+      referee_name: string;
+      home_team: string;
+      away_team: string;
+      watch_intervals: string | null;
+      date: string;
+    }>;
 
   const map = new Map<string, RefereeAggregate>();
+  const genderTally = new Map<string, { men: number; women: number }>();
   for (const r of rows) {
     const intervals: number[][] = (() => {
       try {
@@ -774,15 +826,23 @@ export function getRefereeAggregates(): RefereeAggregate[] {
     })();
     const minutes = intervals.reduce((s, [a, b]) => s + (b - a), 0);
     const name = r.referee_name.trim();
+    const g = matchGender(r.home_team, r.away_team);
     let agg = map.get(name);
     if (!agg) {
-      agg = { name, matches: 0, minutes: 0, firstMatch: null, lastMatch: null };
+      agg = { name, matches: 0, minutes: 0, firstMatch: null, lastMatch: null, gender: "men" };
       map.set(name, agg);
     }
     agg.matches += 1;
     agg.minutes += minutes;
     if (!agg.firstMatch || r.date < agg.firstMatch) agg.firstMatch = r.date;
     if (!agg.lastMatch || r.date > agg.lastMatch) agg.lastMatch = r.date;
+    const t = genderTally.get(name) ?? { men: 0, women: 0 };
+    t[g] += minutes;
+    genderTally.set(name, t);
+  }
+  for (const [name, agg] of map) {
+    const t = genderTally.get(name);
+    if (t) agg.gender = t.women > t.men ? "women" : "men";
   }
   return [...map.values()];
 }
@@ -810,19 +870,24 @@ export function getMatchesByRefereeName(name: string): Match[] {
 export function getStadiumAggregates(): StadiumAggregate[] {
   const rows = db
     .prepare(
-      `SELECT venue_id, venue, venue_city, watch_intervals, watched_in_person, date
+      `SELECT venue_id, venue, venue_city, home_team, away_team,
+              watch_intervals, watched_in_person, date
        FROM matches WHERE venue_id IS NOT NULL`
     )
     .all() as Array<{
       venue_id: number;
       venue: string | null;
       venue_city: string | null;
+      home_team: string;
+      away_team: string;
       watch_intervals: string | null;
       watched_in_person: number;
       date: string;
     }>;
 
   const map = new Map<number, StadiumAggregate>();
+  // Per-venue gender tally so we can pick the dominant side at the end.
+  const genderTally = new Map<number, { men: number; women: number }>();
   for (const r of rows) {
     const intervals: number[][] = (() => {
       try {
@@ -833,6 +898,7 @@ export function getStadiumAggregates(): StadiumAggregate[] {
     })();
     const mins = intervals.reduce((s, [a, b]) => s + (b - a), 0);
     const inPerson = r.watched_in_person === 1;
+    const g = matchGender(r.home_team, r.away_team);
     let agg = map.get(r.venue_id);
     if (!agg) {
       agg = {
@@ -845,6 +911,7 @@ export function getStadiumAggregates(): StadiumAggregate[] {
         inPersonMinutes: 0,
         firstVisit: null,
         lastVisit: null,
+        gender: "men",
       };
       map.set(r.venue_id, agg);
     } else if (!agg.venueCity && r.venue_city) {
@@ -858,6 +925,13 @@ export function getStadiumAggregates(): StadiumAggregate[] {
     }
     if (!agg.firstVisit || r.date < agg.firstVisit) agg.firstVisit = r.date;
     if (!agg.lastVisit || r.date > agg.lastVisit) agg.lastVisit = r.date;
+    const t = genderTally.get(r.venue_id) ?? { men: 0, women: 0 };
+    t[g] += mins;
+    genderTally.set(r.venue_id, t);
+  }
+  for (const [id, agg] of map) {
+    const t = genderTally.get(id);
+    if (t) agg.gender = t.women > t.men ? "women" : "men";
   }
   return [...map.values()];
 }

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getCompetitionsByCountryCode, getMatchesWithDetails } from "@/lib/db";
 import { codeToCountryName } from "@/lib/country-codes";
 import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
+import { pickDefaultGender } from "@/lib/gender";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +49,7 @@ export default async function PlayersInCountryCompetitionsPage({
       </p>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <PlayerStatsTable players={players} pageSize={null} />
+        <PlayerStatsTable players={players} pageSize={null} defaultGender={pickDefaultGender(competitionMatches)} />
       </div>
     </div>
   );

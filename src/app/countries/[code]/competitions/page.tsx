@@ -4,6 +4,7 @@ import { getCompetitionsByCountryCode, getMatchesWithDetails } from "@/lib/db";
 import { codeToCountryName } from "@/lib/country-codes";
 import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
 import { aggregateCompetitions } from "@/lib/stats-aggregation";
+import { pickDefaultGender } from "@/lib/gender";
 import CompetitionStatsTable from "@/app/stats/CompetitionStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ export default async function CountryCompetitionsPage({
       <h1 className="text-2xl font-bold text-white">Competitions from {countryName}</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <CompetitionStatsTable competitions={competitionStats} pageSize={null} />
+        <CompetitionStatsTable competitions={competitionStats} pageSize={null} defaultGender={pickDefaultGender(competitionMatches)} />
       </div>
     </div>
   );

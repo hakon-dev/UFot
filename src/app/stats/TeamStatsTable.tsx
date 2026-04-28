@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { HeaderButton, Pagination, usePagedRows, type SortDir } from "./_components/TableUtils";
+import {
+  GenderToggle, HeaderButton, Pagination, usePagedRows,
+  type GenderFilter, type SortDir,
+} from "./_components/TableUtils";
 
 export interface TeamStat {
   team: string;
@@ -10,10 +13,12 @@ export interface TeamStat {
   crest: string | null;
   country: string | null;
   countryCode: string | null;
+  national: boolean | null;
   matches: number;
   minutes: number;
   goalsFor: number;
   goalsAgainst: number;
+  gender: "men" | "women";
 }
 
 type SortKey = "team" | "country" | "minutes" | "matches" | "goalsFor" | "goalsAgainst";
@@ -38,13 +43,16 @@ function compare(a: TeamStat, b: TeamStat, key: SortKey, dir: SortDir): number {
 export default function TeamStatsTable({
   teams,
   pageSize = 10,
+  defaultGender = "men",
 }: {
   teams: TeamStat[];
   pageSize?: number | null;
+  defaultGender?: "men" | "women";
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [gender, setGender] = useState<GenderFilter>(defaultGender);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -57,21 +65,22 @@ export default function TeamStatsTable({
 
   const processed = useMemo(() => {
     const q = filter.trim().toLowerCase();
+    const byGender = gender === "total" ? teams : teams.filter((t) => t.gender === gender);
     const filtered = q
-      ? teams.filter(
+      ? byGender.filter(
           (t) =>
             t.team.toLowerCase().includes(q) ||
             (t.country?.toLowerCase().includes(q) ?? false)
         )
-      : teams;
+      : byGender;
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [teams, filter, sortKey, sortDir]);
+  }, [teams, filter, sortKey, sortDir, gender]);
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
-      <div className="mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="text"
           value={filter}
@@ -79,6 +88,7 @@ export default function TeamStatsTable({
           placeholder="Filter by team or country…"
           className="w-full sm:max-w-xs bg-surface border border-card-border rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
         />
+        <GenderToggle value={gender} onChange={setGender} />
       </div>
 
       <div className="overflow-x-auto">
@@ -177,7 +187,7 @@ export default function TeamStatsTable({
             {visible.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-6 text-center text-muted">
-                  No teams match &quot;{filter}&quot;.
+                  {filter ? `No teams match "${filter}".` : "No teams in this view."}
                 </td>
               </tr>
             )}

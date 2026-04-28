@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { getCoachAggregates, getCoaches } from "@/lib/db";
+import { getAllMatches, getCoachAggregates, getCoaches } from "@/lib/db";
 import { enrichCoachAggregatesWithNationality } from "@/lib/coach-stats";
+import { pickDefaultGender } from "@/lib/gender";
 import CoachStatsTable, { type CoachStat } from "../CoachStatsTable";
 
 export const dynamic = "force-dynamic";
 
 export default async function AllCoachesPage() {
+  const defaultGender = pickDefaultGender(getAllMatches());
   const aggregates = getCoachAggregates();
   await enrichCoachAggregatesWithNationality(aggregates);
 
@@ -23,6 +25,7 @@ export default async function AllCoachesPage() {
       wins: a.wins,
       draws: a.draws,
       losses: a.losses,
+      gender: a.gender,
     };
   });
 
@@ -38,7 +41,7 @@ export default async function AllCoachesPage() {
       <h1 className="text-2xl font-bold text-white">Most Watched Coaches</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <CoachStatsTable coaches={rows} pageSize={null} />
+        <CoachStatsTable coaches={rows} pageSize={null} defaultGender={defaultGender} />
       </div>
     </div>
   );

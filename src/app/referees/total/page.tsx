@@ -1,15 +1,18 @@
 import Link from "next/link";
-import { getRefereeAggregates } from "@/lib/db";
+import { getAllMatches, getRefereeAggregates } from "@/lib/db";
+import { pickDefaultGender } from "@/lib/gender";
 import RefereeStatsTable, { type RefereeStat } from "../RefereeStatsTable";
 
 export const dynamic = "force-dynamic";
 
 export default function AllRefereesPage() {
+  const defaultGender = pickDefaultGender(getAllMatches());
   const aggregates = getRefereeAggregates();
   const rows: RefereeStat[] = aggregates.map((a) => ({
     name: a.name,
     matches: a.matches,
     minutes: a.minutes,
+    gender: a.gender,
   }));
 
   return (
@@ -24,7 +27,7 @@ export default function AllRefereesPage() {
       <h1 className="text-2xl font-bold text-white">Most Watched Referees</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <RefereeStatsTable referees={rows} pageSize={null} />
+        <RefereeStatsTable referees={rows} pageSize={null} defaultGender={defaultGender} />
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { getCoachAggregates, getCoaches } from "@/lib/db";
+import { getAllMatches, getCoachAggregates, getCoaches } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
 import { enrichCoachAggregatesWithNationality } from "@/lib/coach-stats";
+import { pickDefaultGender } from "@/lib/gender";
 import CoachStatsTable, { type CoachStat } from "./CoachStatsTable";
 import SectionHeader from "@/components/SectionHeader";
 
@@ -12,6 +13,7 @@ export default async function CoachesPage() {
   // in coach data on existing matches that pre-date the v9 column additions.
   await hydratePendingMatches(5);
 
+  const defaultGender = pickDefaultGender(getAllMatches());
   const aggregates = getCoachAggregates();
   await enrichCoachAggregatesWithNationality(aggregates);
 
@@ -29,6 +31,7 @@ export default async function CoachesPage() {
       wins: a.wins,
       draws: a.draws,
       losses: a.losses,
+      gender: a.gender,
     };
   });
 
@@ -52,7 +55,7 @@ export default async function CoachesPage() {
 
       <div className={cardClass}>
         <SectionHeader title="Most Watched Coaches" seeAllHref="/coaches/total" />
-        <CoachStatsTable coaches={rows} pageSize={10} />
+        <CoachStatsTable coaches={rows} pageSize={10} defaultGender={defaultGender} />
       </div>
     </div>
   );

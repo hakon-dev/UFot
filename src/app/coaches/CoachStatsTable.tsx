@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { HeaderButton, Pagination, usePagedRows, type SortDir } from "@/app/stats/_components/TableUtils";
+import {
+  GenderToggle, HeaderButton, Pagination, usePagedRows,
+  type GenderFilter, type SortDir,
+} from "@/app/stats/_components/TableUtils";
 
 export interface CoachStat {
   coachId: number;
@@ -15,6 +18,7 @@ export interface CoachStat {
   wins: number;
   draws: number;
   losses: number;
+  gender: "men" | "women";
 }
 
 type SortKey = "name" | "nationality" | "minutes" | "matches" | "wins" | "draws" | "losses";
@@ -88,13 +92,16 @@ function compare(a: CoachStat, b: CoachStat, key: SortKey, dir: SortDir): number
 export default function CoachStatsTable({
   coaches,
   pageSize = 10,
+  defaultGender = "men",
 }: {
   coaches: CoachStat[];
   pageSize?: number | null;
+  defaultGender?: "men" | "women";
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [gender, setGender] = useState<GenderFilter>(defaultGender);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -106,21 +113,22 @@ export default function CoachStatsTable({
 
   const processed = useMemo(() => {
     const q = filter.trim().toLowerCase();
+    const byGender = gender === "total" ? coaches : coaches.filter((c) => c.gender === gender);
     const filtered = q
-      ? coaches.filter(
+      ? byGender.filter(
           (c) =>
             c.name.toLowerCase().includes(q) ||
             (c.nationality?.toLowerCase().includes(q) ?? false)
         )
-      : coaches;
+      : byGender;
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [coaches, filter, sortKey, sortDir]);
+  }, [coaches, filter, sortKey, sortDir, gender]);
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
-      <div className="mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="text"
           value={filter}
@@ -128,6 +136,7 @@ export default function CoachStatsTable({
           placeholder="Filter by name or nationality…"
           className="w-full sm:max-w-xs bg-surface border border-card-border rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
         />
+        <GenderToggle value={gender} onChange={setGender} />
       </div>
 
       <div className="overflow-x-auto">

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompetition, getMatchesWithDetails } from "@/lib/db";
 import { computePlayerStats, enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
+import { pickDefaultGender } from "@/lib/gender";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export default async function CompetitionPlayersPage({
       <h1 className="text-2xl font-bold text-white">{competition.name} — All Players Watched</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <PlayerStatsTable players={players} pageSize={null} />
+        <PlayerStatsTable players={players} pageSize={null} defaultGender={pickDefaultGender(matches)} />
       </div>
     </div>
   );

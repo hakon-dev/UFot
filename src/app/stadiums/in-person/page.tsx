@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { getStadiumAggregates } from "@/lib/db";
+import { getAllMatches, getStadiumAggregates } from "@/lib/db";
+import { pickDefaultGender } from "@/lib/gender";
 import StadiumStatsTable, { type StadiumStat } from "../StadiumStatsTable";
 
 export const dynamic = "force-dynamic";
 
 export default function AllStadiumsInPersonPage() {
+  const defaultGender = pickDefaultGender(getAllMatches());
   const aggregates = getStadiumAggregates();
   const rows: StadiumStat[] = aggregates
     .filter((a) => a.inPersonMatches > 0)
@@ -14,6 +16,7 @@ export default function AllStadiumsInPersonPage() {
       venueCity: a.venueCity,
       matches: a.inPersonMatches,
       minutes: a.inPersonMinutes,
+      gender: a.gender,
     }));
 
   return (
@@ -28,7 +31,7 @@ export default function AllStadiumsInPersonPage() {
       <h1 className="text-2xl font-bold text-white">Most Watched Stadiums (In Person)</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <StadiumStatsTable stadiums={rows} pageSize={null} matchesLabel="Visits" />
+        <StadiumStatsTable stadiums={rows} pageSize={null} matchesLabel="Visits" defaultGender={defaultGender} />
       </div>
     </div>
   );

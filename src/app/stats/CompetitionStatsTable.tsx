@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { HeaderButton, Pagination, usePagedRows, type SortDir } from "./_components/TableUtils";
+import {
+  GenderToggle, HeaderButton, Pagination, usePagedRows,
+  type GenderFilter, type SortDir,
+} from "./_components/TableUtils";
 
 // Keep in sync with REGION_NAMES in src/lib/competition-stats.ts. Duplicated here (rather than
 // imported) because competition-stats.ts pulls in db.ts and this is a client component.
@@ -39,6 +42,7 @@ export interface CompetitionStat {
   countryCode: string | null;
   matches: number;
   minutes: number;
+  gender: "men" | "women";
 }
 
 type SortKey = "competition" | "country" | "minutes" | "matches";
@@ -63,12 +67,15 @@ function compare(a: CompetitionStat, b: CompetitionStat, key: SortKey, dir: Sort
 export default function CompetitionStatsTable({
   competitions,
   pageSize = 10,
+  defaultGender = "men",
 }: {
   competitions: CompetitionStat[];
   pageSize?: number | null;
+  defaultGender?: "men" | "women";
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [gender, setGender] = useState<GenderFilter>(defaultGender);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -79,15 +86,19 @@ export default function CompetitionStatsTable({
     }
   };
 
-  const sorted = useMemo(
-    () => [...competitions].sort((a, b) => compare(a, b, sortKey, sortDir)),
-    [competitions, sortKey, sortDir]
-  );
+  const sorted = useMemo(() => {
+    const byGender =
+      gender === "total" ? competitions : competitions.filter((c) => c.gender === gender);
+    return [...byGender].sort((a, b) => compare(a, b, sortKey, sortDir));
+  }, [competitions, sortKey, sortDir, gender]);
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(sorted, pageSize);
 
   return (
     <>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <GenderToggle value={gender} onChange={setGender} />
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>

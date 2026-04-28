@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { getStadiumAggregates } from "@/lib/db";
+import { getAllMatches, getStadiumAggregates } from "@/lib/db";
+import { pickDefaultGender } from "@/lib/gender";
 import StadiumStatsTable, { type StadiumStat } from "../StadiumStatsTable";
 
 export const dynamic = "force-dynamic";
 
 export default function AllStadiumsTotalPage() {
+  const defaultGender = pickDefaultGender(getAllMatches());
   const aggregates = getStadiumAggregates();
   const rows: StadiumStat[] = aggregates.map((a) => ({
     venueId: a.venueId,
@@ -12,6 +14,7 @@ export default function AllStadiumsTotalPage() {
     venueCity: a.venueCity,
     matches: a.totalMatches,
     minutes: a.totalMinutes,
+    gender: a.gender,
   }));
 
   return (
@@ -26,7 +29,7 @@ export default function AllStadiumsTotalPage() {
       <h1 className="text-2xl font-bold text-white">Most Watched Stadiums</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <StadiumStatsTable stadiums={rows} pageSize={null} />
+        <StadiumStatsTable stadiums={rows} pageSize={null} defaultGender={defaultGender} />
       </div>
     </div>
   );

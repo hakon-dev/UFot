@@ -3,6 +3,7 @@ import { getAllMatches } from "@/lib/db";
 import { hydratePendingMatches } from "@/lib/match-hydration";
 import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
 import { aggregateCompetitions } from "@/lib/stats-aggregation";
+import { pickDefaultGender } from "@/lib/gender";
 import CompetitionStatsTable from "../CompetitionStatsTable";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export default async function AllCompetitionsStatsPage() {
   await hydratePendingMatches(5);
 
   const matches = getAllMatches();
+  const defaultGender = pickDefaultGender(matches);
   const competitions = aggregateCompetitions(matches);
   await enrichCompetitionRecordsWithDetails(competitions);
 
@@ -30,7 +32,7 @@ export default async function AllCompetitionsStatsPage() {
         {competitions.length === 0 ? (
           <p className="text-muted text-center py-8">No competitions yet.</p>
         ) : (
-          <CompetitionStatsTable competitions={competitions} pageSize={null} />
+          <CompetitionStatsTable competitions={competitions} pageSize={null} defaultGender={defaultGender} />
         )}
       </div>
     </div>
