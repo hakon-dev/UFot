@@ -67,7 +67,7 @@ export default function TeamStatsTable({
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
   }, [teams, filter, sortKey, sortDir]);
 
-  const { page, setPage, pageCount, visible } = usePagedRows(processed, pageSize);
+  const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
@@ -84,6 +84,7 @@ export default function TeamStatsTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
+            <col className="w-10" />
             <col />
             <col className="w-44" />
             <col className="w-24" />
@@ -93,6 +94,7 @@ export default function TeamStatsTable({
           </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
+              <th className="text-center pb-3 font-medium">#</th>
               <th className="text-left pb-3">
                 <HeaderButton label="Team" sortKey="team" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
               </th>
@@ -114,7 +116,7 @@ export default function TeamStatsTable({
             </tr>
           </thead>
           <tbody>
-            {visible.map((t) => {
+            {visible.map((t, i) => {
               const cellInner = (
                 <div className="flex items-center gap-2.5 min-w-0">
                   {t.crest ? (
@@ -130,6 +132,7 @@ export default function TeamStatsTable({
               );
               return (
                 <tr key={t.teamId ?? t.team} className="border-b border-card-border/50">
+                  <td className="py-2.5 text-center text-muted tabular-nums">{startIndex + i + 1}</td>
                   <td className="py-2.5 text-slate-200 font-medium">
                     {t.teamId != null ? (
                       <Link href={`/teams/${t.teamId}`} className="hover:text-accent transition-colors block max-w-full">
@@ -173,7 +176,7 @@ export default function TeamStatsTable({
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-muted">
+                <td colSpan={7} className="py-6 text-center text-muted">
                   No teams match &quot;{filter}&quot;.
                 </td>
               </tr>

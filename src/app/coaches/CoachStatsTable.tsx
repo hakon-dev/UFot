@@ -116,7 +116,7 @@ export default function CoachStatsTable({
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
   }, [coaches, filter, sortKey, sortDir]);
 
-  const { page, setPage, pageCount, visible } = usePagedRows(processed, pageSize);
+  const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
@@ -133,6 +133,7 @@ export default function CoachStatsTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
+            <col className="w-10" />
             <col />
             <col className="w-44" />
             <col className="w-24" />
@@ -143,6 +144,7 @@ export default function CoachStatsTable({
           </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
+              <th className="text-center pb-3 font-medium">#</th>
               <th className="text-left pb-3">
                 <HeaderButton label="Coach" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
               </th>
@@ -167,8 +169,9 @@ export default function CoachStatsTable({
             </tr>
           </thead>
           <tbody>
-            {visible.map((c) => (
+            {visible.map((c, i) => (
               <tr key={c.coachId} className="border-b border-card-border/50">
+                <td className="py-2.5 text-center text-muted tabular-nums">{startIndex + i + 1}</td>
                 <td className="py-2.5 text-slate-200 font-medium">
                   <Link href={`/coaches/${c.coachId}`} className="hover:text-accent transition-colors block max-w-full">
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -189,7 +192,7 @@ export default function CoachStatsTable({
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-muted">
+                <td colSpan={8} className="py-6 text-center text-muted">
                   {filter ? `No coaches match "${filter}".` : "No coaches yet."}
                 </td>
               </tr>

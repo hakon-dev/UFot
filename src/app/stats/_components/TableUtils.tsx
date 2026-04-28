@@ -48,20 +48,21 @@ export function usePagedRows<T>(
   setPage: (p: number) => void;
   pageCount: number;
   visible: T[];
+  startIndex: number;
 } {
   const [rawPage, setPage] = useState(1);
 
   const total = rows.length;
   const pageCount = pageSize == null ? 1 : Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(Math.max(1, rawPage), pageCount);
+  const startIndex = pageSize == null ? 0 : (page - 1) * pageSize;
 
   const visible = useMemo(() => {
     if (pageSize == null) return rows;
-    const start = (page - 1) * pageSize;
-    return rows.slice(start, start + pageSize);
-  }, [rows, page, pageSize]);
+    return rows.slice(startIndex, startIndex + pageSize);
+  }, [rows, startIndex, pageSize]);
 
-  return { page, setPage, pageCount, visible };
+  return { page, setPage, pageCount, visible, startIndex };
 }
 
 export function Pagination({

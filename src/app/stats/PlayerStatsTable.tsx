@@ -198,7 +198,7 @@ export default function PlayerStatsTable({
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
   }, [players, filter, sortKey, sortDir]);
 
-  const { page, setPage, pageCount, visible } = usePagedRows(processed, pageSize);
+  const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
@@ -215,6 +215,7 @@ export default function PlayerStatsTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
+            <col className="w-10" />
             <col />
             <col className="w-44" />
             <col className="w-44" />
@@ -227,6 +228,7 @@ export default function PlayerStatsTable({
           </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
+              <th className="text-center pb-3 font-medium">#</th>
               <th className="text-left pb-3">
                 <HeaderButton label="Player" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
               </th>
@@ -266,6 +268,7 @@ export default function PlayerStatsTable({
               );
               return (
                 <tr key={`${p.playerId ?? "n"}-${p.name}-${i}`} className="border-b border-card-border/50">
+                  <td className="py-2.5 text-center text-muted tabular-nums">{startIndex + i + 1}</td>
                   <td className="py-2.5 text-slate-200 font-medium">
                     {p.playerId != null ? (
                       <Link
@@ -305,7 +308,7 @@ export default function PlayerStatsTable({
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={9} className="py-6 text-center text-muted">
+                <td colSpan={10} className="py-6 text-center text-muted">
                   {filter ? `No players match "${filter}".` : "No players yet."}
                 </td>
               </tr>

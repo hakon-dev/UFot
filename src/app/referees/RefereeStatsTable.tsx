@@ -45,7 +45,7 @@ export default function RefereeStatsTable({
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
   }, [referees, filter, sortKey, sortDir]);
 
-  const { page, setPage, pageCount, visible } = usePagedRows(processed, pageSize);
+  const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
   return (
     <>
@@ -62,12 +62,14 @@ export default function RefereeStatsTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
+            <col className="w-10" />
             <col />
             <col className="w-28" />
             <col className="w-24" />
           </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
+              <th className="text-center pb-3 font-medium">#</th>
               <th className="text-left pb-3">
                 <HeaderButton label="Referee" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
               </th>
@@ -80,8 +82,9 @@ export default function RefereeStatsTable({
             </tr>
           </thead>
           <tbody>
-            {visible.map((r) => (
+            {visible.map((r, i) => (
               <tr key={r.name} className="border-b border-card-border/50">
+                <td className="py-2.5 text-center text-muted tabular-nums">{startIndex + i + 1}</td>
                 <td className="py-2.5 text-slate-200 font-medium">
                   <Link
                     href={`/referees/${encodeURIComponent(r.name)}`}
@@ -96,7 +99,7 @@ export default function RefereeStatsTable({
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={3} className="py-6 text-center text-muted">
+                <td colSpan={4} className="py-6 text-center text-muted">
                   {filter ? `No referees match "${filter}".` : "No referees yet."}
                 </td>
               </tr>

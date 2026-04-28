@@ -84,13 +84,14 @@ export default function CompetitionStatsTable({
     [competitions, sortKey, sortDir]
   );
 
-  const { page, setPage, pageCount, visible } = usePagedRows(sorted, pageSize);
+  const { page, setPage, pageCount, visible, startIndex } = usePagedRows(sorted, pageSize);
 
   return (
     <>
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
+            <col className="w-10" />
             <col />
             <col className="w-44" />
             <col className="w-28" />
@@ -98,6 +99,7 @@ export default function CompetitionStatsTable({
           </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
+              <th className="text-center pb-3 font-medium">#</th>
               <th className="text-left pb-3">
                 <HeaderButton label="Competition" sortKey="competition" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
               </th>
@@ -113,7 +115,7 @@ export default function CompetitionStatsTable({
             </tr>
           </thead>
           <tbody>
-            {visible.map((c) => {
+            {visible.map((c, i) => {
               const cellInner = (
                 <div className="flex items-center gap-2.5 min-w-0">
                   {c.logo ? (
@@ -127,6 +129,7 @@ export default function CompetitionStatsTable({
               );
               return (
               <tr key={c.competitionId ?? c.competition} className="border-b border-card-border/50">
+                <td className="py-2.5 text-center text-muted tabular-nums">{startIndex + i + 1}</td>
                 <td className="py-2.5 text-slate-200 font-medium">
                   {c.competitionId != null ? (
                     <Link href={`/competitions/${c.competitionId}`} className="hover:text-accent transition-colors block max-w-full">
@@ -182,7 +185,7 @@ export default function CompetitionStatsTable({
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={4} className="py-6 text-center text-muted">No competitions yet.</td>
+                <td colSpan={5} className="py-6 text-center text-muted">No competitions yet.</td>
               </tr>
             )}
           </tbody>

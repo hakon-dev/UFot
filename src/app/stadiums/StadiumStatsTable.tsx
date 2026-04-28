@@ -56,13 +56,14 @@ export default function StadiumStatsTable({
     [stadiums, sortKey, sortDir]
   );
 
-  const { page, setPage, pageCount, visible } = usePagedRows(sorted, pageSize);
+  const { page, setPage, pageCount, visible, startIndex } = usePagedRows(sorted, pageSize);
 
   return (
     <>
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
+            <col className="w-10" />
             <col />
             <col className="w-44" />
             <col className="w-28" />
@@ -70,6 +71,7 @@ export default function StadiumStatsTable({
           </colgroup>
           <thead>
             <tr className="text-muted border-b border-card-border">
+              <th className="text-center pb-3 font-medium">#</th>
               <th className="text-left pb-3">
                 <HeaderButton label="Stadium" sortKey="stadium" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} align="left" />
               </th>
@@ -85,8 +87,9 @@ export default function StadiumStatsTable({
             </tr>
           </thead>
           <tbody>
-            {visible.map((s) => (
+            {visible.map((s, i) => (
               <tr key={s.venueId} className="border-b border-card-border/50">
+                <td className="py-2.5 text-center text-muted tabular-nums">{startIndex + i + 1}</td>
                 <td className="py-2.5 text-slate-200 font-medium">
                   <Link href={`/stadiums/${s.venueId}`} className="hover:text-accent transition-colors truncate block max-w-full">
                     {s.venueName}
@@ -105,7 +108,7 @@ export default function StadiumStatsTable({
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={4} className="py-6 text-center text-muted">No stadiums yet.</td>
+                <td colSpan={5} className="py-6 text-center text-muted">No stadiums yet.</td>
               </tr>
             )}
           </tbody>
