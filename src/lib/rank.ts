@@ -80,9 +80,10 @@ export async function getTeamRank(teamId: number): Promise<RankItem[]> {
   ];
 
   if (targetIsNational) {
-    // National teams also get a rank against the nationals-only pool — links to
-    // /stats/national-teams. Country scope is skipped (a national team's peers in its country
-    // are just its age-group and women's variants).
+    // National teams also get a rank against the nationals-only pool. The merged /stats/teams
+    // table carries a Club/National/Total toggle so that's where the link lands. Country scope
+    // is skipped (a national team's peers in its country are just its age-group and women's
+    // variants).
     const nationalsPool = overallPool.filter((t) => t.national === true);
     const natIdx = nationalsPool.findIndex((t) => t.teamId === teamId);
     if (natIdx !== -1) {

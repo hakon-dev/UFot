@@ -1,13 +1,11 @@
 import Link from "next/link";
-import { getAllMatches, getStadiumAggregates } from "@/lib/db";
-import { pickDefaultGender } from "@/lib/gender";
+import { getStadiumAggregates } from "@/lib/db";
 import StadiumStatsTable, { type StadiumStat } from "./StadiumStatsTable";
 import SectionHeader from "@/components/SectionHeader";
 
 export const dynamic = "force-dynamic";
 
 export default function StadiumsPage() {
-  const defaultGender = pickDefaultGender(getAllMatches());
   const aggregates = getStadiumAggregates();
 
   const totalRows: StadiumStat[] = aggregates.map((a) => ({
@@ -16,7 +14,6 @@ export default function StadiumsPage() {
     venueCity: a.venueCity,
     matches: a.totalMatches,
     minutes: a.totalMinutes,
-    gender: a.gender,
   }));
 
   const inPersonRows: StadiumStat[] = aggregates
@@ -27,7 +24,6 @@ export default function StadiumsPage() {
       venueCity: a.venueCity,
       matches: a.inPersonMatches,
       minutes: a.inPersonMinutes,
-      gender: a.gender,
     }));
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
@@ -50,12 +46,12 @@ export default function StadiumsPage() {
 
       <div className={cardClass}>
         <SectionHeader title="Most Watched Stadiums" seeAllHref="/stadiums/total" />
-        <StadiumStatsTable stadiums={totalRows} pageSize={10} defaultGender={defaultGender} />
+        <StadiumStatsTable stadiums={totalRows} pageSize={10} />
       </div>
 
       <div className={cardClass}>
         <SectionHeader title="Most Watched Stadiums (In Person)" seeAllHref="/stadiums/in-person" />
-        <StadiumStatsTable stadiums={inPersonRows} pageSize={10} matchesLabel="Visits" defaultGender={defaultGender} />
+        <StadiumStatsTable stadiums={inPersonRows} pageSize={10} matchesLabel="Visits" />
       </div>
     </div>
   );

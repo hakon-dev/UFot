@@ -404,6 +404,125 @@ if (userVersion < 10) {
   `);
   db.pragma("user_version = 10");
 }
+//   v11 — Repair matches where API-Football flipped which team is designated "home" between
+//        the original fixture listing (when the user added the match) and the post-match
+//        details endpoint. Common at neutral-venue national-team games — e.g. the 2025 UEFA
+//        Nations League final at Allianz Arena: fixture listing had Portugal=home, the details
+//        endpoint flipped to Spain=home, so lineups + coaches got saved with the new home/away
+//        designation while the match row stayed on the original. Result: Bruno Fernandes (and
+//        every Portugal player) was tagged team='away', which player-attribution code resolves
+//        to match.away_team='Spain'. Detection: a national-team match where home-tagged
+//        starters' nationalities mostly match the AWAY team's country. Repair: flip lineup
+//        team tags and swap home/away coach + formation. Going-forward saves are guarded by
+//        the swap-detection block in `saveMatchDetails`. Goals/cards/subs store the team's
+//        name (not "home"/"away") so they don't need adjustment.
+if (userVersion < 11) {
+  const candidates = db
+    .prepare(
+      `SELECT m.id, th.country_code AS home_cc, ta.country_code AS away_cc
+       FROM matches m
+       LEFT JOIN teams th ON th.id = m.home_team_id
+       LEFT JOIN teams ta ON ta.id = m.away_team_id
+       WHERE m.details_fetched = 1
+         AND m.home_team_id IS NOT NULL
+         AND m.away_team_id IS NOT NULL
+         AND th.national = 1 AND ta.national = 1
+         AND th.country_code IS NOT NULL AND ta.country_code IS NOT NULL`
+    )
+    .all() as { id: string; home_cc: string; away_cc: string }[];
+
+  const homeStarterStmt = db.prepare(
+    `SELECT p.country_code AS player_cc
+     FROM match_lineups ml
+     LEFT JOIN players p ON p.id = ml.player_id
+     WHERE ml.match_id = ? AND ml.team = 'home' AND ml.is_starter = 1`
+  );
+  const flipLineupsStmt = db.prepare(
+    `UPDATE match_lineups SET team = CASE team WHEN 'home' THEN 'away' ELSE 'home' END WHERE match_id = ?`
+  );
+  // SQLite UPDATE evaluates every SET expression against the row's pre-update values, so a
+  // direct cross-assignment (home := away, away := home) atomically swaps the columns.
+  const swapMatchSidesStmt = db.prepare(
+    `UPDATE matches SET
+       home_coach_id = away_coach_id,
+       away_coach_id = home_coach_id,
+       home_coach_name = away_coach_name,
+       away_coach_name = home_coach_name,
+       home_formation = away_formation,
+       away_formation = home_formation
+     WHERE id = ?`
+  );
+
+  for (const m of candidates) {
+    const homeStarters = homeStarterStmt.all(m.id) as { player_cc: string | null }[];
+    let homeMatch = 0;
+    let awayMatch = 0;
+    for (const s of homeStarters) {
+      if (!s.player_cc) continue;
+      if (s.player_cc === m.home_cc) homeMatch++;
+      else if (s.player_cc === m.away_cc) awayMatch++;
+    }
+    if (homeMatch + awayMatch >= 3 && awayMatch > homeMatch) {
+      flipLineupsStmt.run(m.id);
+      swapMatchSidesStmt.run(m.id);
+    }
+  }
+  db.pragma("user_version = 11");
+}
+//   v12 — Repair `match_substitutions.team` and `match_cards.team` for events that store the
+//        wrong team name. API-Football's events endpoint occasionally returns a `team.name`
+//        on substitution events that doesn't match the player's actual team — for the 2025
+//        UEFA Nations League final, every Portugal substitution came back tagged 'Spain' and
+//        every Spain sub tagged 'Portugal' (independent of the home/away inversion that v11
+//        addressed). Cards weren't observed wrong in that match but the same API anomaly
+//        could affect them, so we repair both. Goals are intentionally skipped: own goals are
+//        legitimately credited to the OPPOSITE team from the kicker, so a player_id → team
+//        rebuild would corrupt them. Method: for each sub, look up `player_out_id` (preferred)
+//        or `player_in_id` (fallback) in `match_lineups` for the same match. The lineup row's
+//        `team` ('home'/'away') maps to the match's `home_team` or `away_team` name. For each
+//        card, look up `player_id`. Idempotent: rows whose team is already correct just get
+//        rewritten to the same value. Going-forward saves are guarded by a post-insert pass
+//        in `saveMatchDetails`.
+if (userVersion < 12) {
+  db.exec(
+    `UPDATE match_substitutions
+     SET team = (
+       SELECT CASE ml.team WHEN 'home' THEN m.home_team ELSE m.away_team END
+       FROM match_lineups ml
+       JOIN matches m ON m.id = ml.match_id
+       WHERE ml.match_id = match_substitutions.match_id
+         AND ml.player_id IS NOT NULL
+         AND ml.player_id = COALESCE(match_substitutions.player_out_id, match_substitutions.player_in_id)
+       LIMIT 1
+     )
+     WHERE EXISTS (
+       SELECT 1 FROM match_lineups ml
+       WHERE ml.match_id = match_substitutions.match_id
+         AND ml.player_id IS NOT NULL
+         AND ml.player_id = COALESCE(match_substitutions.player_out_id, match_substitutions.player_in_id)
+     )`
+  );
+  db.exec(
+    `UPDATE match_cards
+     SET team = (
+       SELECT CASE ml.team WHEN 'home' THEN m.home_team ELSE m.away_team END
+       FROM match_lineups ml
+       JOIN matches m ON m.id = ml.match_id
+       WHERE ml.match_id = match_cards.match_id
+         AND ml.player_id IS NOT NULL
+         AND ml.player_id = match_cards.player_id
+       LIMIT 1
+     )
+     WHERE match_cards.player_id IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM match_lineups ml
+         WHERE ml.match_id = match_cards.match_id
+           AND ml.player_id IS NOT NULL
+           AND ml.player_id = match_cards.player_id
+       )`
+  );
+  db.pragma("user_version = 12");
+}
 
 // NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null
 // home_formation or any sub with null player_in_id and purged the match's details so the
@@ -1024,6 +1143,46 @@ export function saveMatchDetails(
   );
 
   const transaction = db.transaction(() => {
+    // Detect API-Football home/away inversion. The /fixtures listing and the post-match
+    // /fixtures/lineups + /fixtures?id=X endpoints occasionally disagree on which team is
+    // designated "home" — typically for neutral-venue games (the 2025 UEFA Nations League
+    // final at Allianz Arena flipped Portugal↔Spain). The match row was created under the
+    // original designation and player-attribution code keys off `lineup.team` →
+    // `match.{home_team, away_team}`, so an unflipped save mis-attributes Bruno Fernandes
+    // (Portugal) to Spain. Re-tag the incoming detail rows to align with the existing match
+    // row. Goals/cards/subs use the team's NAME (not "home"/"away") so they don't need
+    // re-tagging.
+    let lineupsToInsert = lineups;
+    let metaToUse = meta;
+    if (meta?.homeTeamId != null && meta?.awayTeamId != null) {
+      const existingRow = db
+        .prepare("SELECT home_team_id, away_team_id FROM matches WHERE id = ?")
+        .get(matchId) as { home_team_id: number | null; away_team_id: number | null } | undefined;
+      const swapped =
+        existingRow?.home_team_id != null &&
+        existingRow?.away_team_id != null &&
+        meta.homeTeamId === existingRow.away_team_id &&
+        meta.awayTeamId === existingRow.home_team_id;
+      if (swapped) {
+        const flip = (t: string) => (t === "home" ? "away" : "home");
+        lineupsToInsert = lineups.map((l) => ({ ...l, team: flip(l.team) }));
+        metaToUse = {
+          ...meta,
+          homeFormation: meta.awayFormation ?? null,
+          awayFormation: meta.homeFormation ?? null,
+          homeCoachId: meta.awayCoachId ?? null,
+          homeCoachName: meta.awayCoachName ?? null,
+          homeCoachPhoto: meta.awayCoachPhoto ?? null,
+          awayCoachId: meta.homeCoachId ?? null,
+          awayCoachName: meta.homeCoachName ?? null,
+          awayCoachPhoto: meta.homeCoachPhoto ?? null,
+          // Keep the match row stable — don't overwrite home_team_id / away_team_id.
+          homeTeamId: existingRow!.home_team_id,
+          awayTeamId: existingRow!.away_team_id,
+        };
+      }
+    }
+
     // Idempotent: clear any stale detail rows for this match before inserting. Without this,
     // two racing hydration paths (POST-time + stats-page rescue, or concurrent detail-page
     // opens) both read `details_fetched=0` and both insert, producing duplicate lineup/goal
@@ -1045,7 +1204,7 @@ export function saveMatchDetails(
         s.player_out_id ?? null, s.player_in_id ?? null
       );
     }
-    for (const l of lineups) {
+    for (const l of lineupsToInsert) {
       insertLineup.run(
         matchId, l.team, l.player_name, l.position ?? null, l.shirt_number ?? null, l.is_starter,
         l.player_id ?? null, l.grid_position ?? null
@@ -1056,6 +1215,54 @@ export function saveMatchDetails(
         matchId, c.minute, c.team, c.player_name, c.player_id ?? null, c.card_type
       );
     }
+
+    // Repair pass: API-Football's events endpoint occasionally returns a `team.name` on
+    // substitution events that doesn't match the player's actual team (e.g. the 2025 UEFA
+    // Nations League final tagged every Portugal sub as 'Spain'). Cross-check each sub/card
+    // against the just-inserted lineup rows by player id and fix the team name if it's wrong.
+    // Goals are intentionally not rebuilt: own goals are legitimately credited to the team
+    // OPPOSITE the kicker, so a scorer_id → team rebuild would corrupt them. See v12
+    // migration for the equivalent retroactive repair.
+    db.prepare(
+      `UPDATE match_substitutions
+       SET team = (
+         SELECT CASE ml.team WHEN 'home' THEN m.home_team ELSE m.away_team END
+         FROM match_lineups ml
+         JOIN matches m ON m.id = ml.match_id
+         WHERE ml.match_id = match_substitutions.match_id
+           AND ml.player_id IS NOT NULL
+           AND ml.player_id = COALESCE(match_substitutions.player_out_id, match_substitutions.player_in_id)
+         LIMIT 1
+       )
+       WHERE match_substitutions.match_id = ?
+         AND EXISTS (
+           SELECT 1 FROM match_lineups ml
+           WHERE ml.match_id = match_substitutions.match_id
+             AND ml.player_id IS NOT NULL
+             AND ml.player_id = COALESCE(match_substitutions.player_out_id, match_substitutions.player_in_id)
+         )`
+    ).run(matchId);
+    db.prepare(
+      `UPDATE match_cards
+       SET team = (
+         SELECT CASE ml.team WHEN 'home' THEN m.home_team ELSE m.away_team END
+         FROM match_lineups ml
+         JOIN matches m ON m.id = ml.match_id
+         WHERE ml.match_id = match_cards.match_id
+           AND ml.player_id IS NOT NULL
+           AND ml.player_id = match_cards.player_id
+         LIMIT 1
+       )
+       WHERE match_cards.match_id = ?
+         AND match_cards.player_id IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM match_lineups ml
+           WHERE ml.match_id = match_cards.match_id
+             AND ml.player_id IS NOT NULL
+             AND ml.player_id = match_cards.player_id
+         )`
+    ).run(matchId);
+
     // Completeness: both teams have at least one starter AND the saved goal-event count meets
     // or exceeds the final score. Formations and substitution counts are NOT checked because
     // the API legitimately returns null formations and variable sub counts for valid matches.
@@ -1064,12 +1271,12 @@ export function saveMatchDetails(
     const scoreRow = db
       .prepare("SELECT home_score, away_score FROM matches WHERE id = ?")
       .get(matchId) as { home_score: number; away_score: number } | undefined;
-    const homeStarters = lineups.filter((l) => l.team === "home" && l.is_starter === 1).length;
-    const awayStarters = lineups.filter((l) => l.team === "away" && l.is_starter === 1).length;
+    const homeStarters = lineupsToInsert.filter((l) => l.team === "home" && l.is_starter === 1).length;
+    const awayStarters = lineupsToInsert.filter((l) => l.team === "away" && l.is_starter === 1).length;
     const totalScore = (scoreRow?.home_score ?? 0) + (scoreRow?.away_score ?? 0);
     const complete = homeStarters > 0 && awayStarters > 0 && goals.length >= totalScore ? 1 : 0;
 
-    if (meta) {
+    if (metaToUse) {
       db.prepare(
         `UPDATE matches SET
           details_fetched = 1,
@@ -1089,18 +1296,18 @@ export function saveMatchDetails(
         WHERE id = ?`
       ).run(
         complete,
-        meta.homeFormation ?? null,
-        meta.awayFormation ?? null,
-        meta.homeTeamId ?? null,
-        meta.awayTeamId ?? null,
-        meta.refereeName ?? null,
-        meta.homeCoachId ?? null,
-        meta.homeCoachName ?? null,
-        meta.awayCoachId ?? null,
-        meta.awayCoachName ?? null,
-        meta.venueId ?? null,
-        meta.venueName ?? null,
-        meta.venueCity ?? null,
+        metaToUse.homeFormation ?? null,
+        metaToUse.awayFormation ?? null,
+        metaToUse.homeTeamId ?? null,
+        metaToUse.awayTeamId ?? null,
+        metaToUse.refereeName ?? null,
+        metaToUse.homeCoachId ?? null,
+        metaToUse.homeCoachName ?? null,
+        metaToUse.awayCoachId ?? null,
+        metaToUse.awayCoachName ?? null,
+        metaToUse.venueId ?? null,
+        metaToUse.venueName ?? null,
+        metaToUse.venueCity ?? null,
         matchId
       );
 
@@ -1113,11 +1320,11 @@ export function saveMatchDetails(
            name = excluded.name,
            photo = COALESCE(excluded.photo, coaches.photo)`
       );
-      if (meta.homeCoachId != null && meta.homeCoachName) {
-        upsertCoachStmt.run(meta.homeCoachId, meta.homeCoachName, meta.homeCoachPhoto ?? null);
+      if (metaToUse.homeCoachId != null && metaToUse.homeCoachName) {
+        upsertCoachStmt.run(metaToUse.homeCoachId, metaToUse.homeCoachName, metaToUse.homeCoachPhoto ?? null);
       }
-      if (meta.awayCoachId != null && meta.awayCoachName) {
-        upsertCoachStmt.run(meta.awayCoachId, meta.awayCoachName, meta.awayCoachPhoto ?? null);
+      if (metaToUse.awayCoachId != null && metaToUse.awayCoachName) {
+        upsertCoachStmt.run(metaToUse.awayCoachId, metaToUse.awayCoachName, metaToUse.awayCoachPhoto ?? null);
       }
     } else {
       db.prepare("UPDATE matches SET details_fetched = 1, details_complete = ? WHERE id = ?").run(complete, matchId);

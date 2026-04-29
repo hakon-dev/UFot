@@ -4,7 +4,7 @@ import type { RankItem, EntityKind } from "@/lib/rank";
 const OVERALL_TABLE_HREF: Record<EntityKind, string> = {
   player: "/stats/players",
   team: "/stats/teams",
-  national_team: "/stats/national-teams",
+  national_team: "/stats/teams",
   competition: "/stats/competitions",
   stadium: "/stadiums/total",
   coach: "/coaches/total",

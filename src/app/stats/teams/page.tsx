@@ -32,7 +32,7 @@ export default async function AllTeamsStatsPage() {
         {teams.length === 0 ? (
           <p className="text-muted text-center py-8">No teams yet.</p>
         ) : (
-          <TeamStatsTable teams={teams} pageSize={null} defaultGender={defaultGender} />
+          <TeamStatsTable teams={teams} pageSize={null} defaultGender={defaultGender} showTypeToggle />
         )}
       </div>
     </div>

@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
-  GenderToggle, HeaderButton, Pagination, usePagedRows,
-  type GenderFilter, type SortDir,
+  GenderToggle, HeaderButton, Pagination, TeamTypeToggle, usePagedRows,
+  type GenderFilter, type SortDir, type TeamTypeFilter,
 } from "./_components/TableUtils";
 
 export interface TeamStat {
@@ -44,15 +44,20 @@ export default function TeamStatsTable({
   teams,
   pageSize = 10,
   defaultGender = "men",
+  showTypeToggle = false,
+  showGenderToggle = true,
 }: {
   teams: TeamStat[];
   pageSize?: number | null;
   defaultGender?: "men" | "women";
+  showTypeToggle?: boolean;
+  showGenderToggle?: boolean;
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [gender, setGender] = useState<GenderFilter>(defaultGender);
+  const [teamType, setTeamType] = useState<TeamTypeFilter>("total");
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -65,16 +70,25 @@ export default function TeamStatsTable({
 
   const processed = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const byGender = gender === "total" ? teams : teams.filter((t) => t.gender === gender);
+    const byGender =
+      !showGenderToggle || gender === "total"
+        ? teams
+        : teams.filter((t) => t.gender === gender);
+    const byType =
+      !showTypeToggle || teamType === "total"
+        ? byGender
+        : teamType === "national"
+        ? byGender.filter((t) => t.national === true)
+        : byGender.filter((t) => t.national !== true);
     const filtered = q
-      ? byGender.filter(
+      ? byType.filter(
           (t) =>
             t.team.toLowerCase().includes(q) ||
             (t.country?.toLowerCase().includes(q) ?? false)
         )
-      : byGender;
+      : byType;
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [teams, filter, sortKey, sortDir, gender]);
+  }, [teams, filter, sortKey, sortDir, gender, teamType, showTypeToggle, showGenderToggle]);
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
@@ -88,7 +102,8 @@ export default function TeamStatsTable({
           placeholder="Filter by team or country…"
           className="w-full sm:max-w-xs bg-surface border border-card-border rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
         />
-        <GenderToggle value={gender} onChange={setGender} />
+        {showGenderToggle && <GenderToggle value={gender} onChange={setGender} />}
+        {showTypeToggle && <TeamTypeToggle value={teamType} onChange={setTeamType} />}
       </div>
 
       <div className="overflow-x-auto">

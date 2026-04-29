@@ -173,10 +173,12 @@ export default function PlayerStatsTable({
   players,
   pageSize = 10,
   defaultGender = "men",
+  showGenderToggle = true,
 }: {
   players: PlayerStat[];
   pageSize?: number | null;
   defaultGender?: "men" | "women";
+  showGenderToggle?: boolean;
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutesWatched");
@@ -194,7 +196,10 @@ export default function PlayerStatsTable({
 
   const processed = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const byGender = gender === "total" ? players : players.filter((p) => p.gender === gender);
+    const byGender =
+      !showGenderToggle || gender === "total"
+        ? players
+        : players.filter((p) => p.gender === gender);
     const filtered = q
       ? byGender.filter(
           (p) =>
@@ -204,7 +209,7 @@ export default function PlayerStatsTable({
         )
       : byGender;
     return [...filtered].sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [players, filter, sortKey, sortDir, gender]);
+  }, [players, filter, sortKey, sortDir, gender, showGenderToggle]);
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(processed, pageSize);
 
@@ -218,7 +223,7 @@ export default function PlayerStatsTable({
           placeholder="Filter by name, club, or nationality…"
           className="w-full sm:max-w-xs bg-surface border border-card-border rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
         />
-        <GenderToggle value={gender} onChange={setGender} />
+        {showGenderToggle && <GenderToggle value={gender} onChange={setGender} />}
       </div>
 
       <div className="overflow-x-auto">

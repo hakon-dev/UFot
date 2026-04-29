@@ -43,7 +43,7 @@ export default async function CompetitionTeamsPage({
       <h1 className="text-2xl font-bold text-white">{competition.name} — All Teams Watched</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <TeamStatsTable teams={teams} pageSize={null} defaultGender={pickDefaultGender(matches)} />
+        <TeamStatsTable teams={teams} pageSize={null} defaultGender={pickDefaultGender(matches)} showGenderToggle={false} />
       </div>
     </div>
   );

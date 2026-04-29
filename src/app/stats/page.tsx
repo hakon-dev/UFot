@@ -65,7 +65,6 @@ export default async function StatsPage() {
     venueCity: a.venueCity,
     matches: a.totalMatches,
     minutes: a.totalMinutes,
-    gender: a.gender,
   }));
   const stadiumInPersonRows: StadiumStat[] = stadiumAggregates
     .filter((a) => a.inPersonMatches > 0)
@@ -75,7 +74,6 @@ export default async function StatsPage() {
       venueCity: a.venueCity,
       matches: a.inPersonMatches,
       minutes: a.inPersonMinutes,
-      gender: a.gender,
     }));
 
   const matchesWithDetails = getMatchesWithDetails();
@@ -85,7 +83,6 @@ export default async function StatsPage() {
   // and a national team ends up as a player's "club".
   const teams = aggregateTeams(matches);
   await enrichTeamRecordsWithCountry(teams);
-  const nationalTeams = teams.filter((t) => t.national === true);
 
   const playerStats = computePlayerStats(matchesWithDetails);
   await enrichPlayerStatsWithNationality(playerStats);
@@ -168,16 +165,8 @@ export default async function StatsPage() {
           {/* Most Watched Teams */}
           <div className={sectionClass}>
             <SectionHeader title="Most Watched Teams" href="/stats/teams" />
-            <TeamStatsTable teams={teams} pageSize={10} defaultGender={defaultGender} />
+            <TeamStatsTable teams={teams} pageSize={10} defaultGender={defaultGender} showTypeToggle />
           </div>
-
-          {/* Most Watched National Teams */}
-          {nationalTeams.length > 0 && (
-            <div className={sectionClass}>
-              <SectionHeader title="Most Watched National Teams" href="/stats/national-teams" />
-              <TeamStatsTable teams={nationalTeams} pageSize={10} defaultGender={defaultGender} />
-            </div>
-          )}
 
           {/* Most Watched Players */}
           {playerStats.length > 0 && (
@@ -197,7 +186,7 @@ export default async function StatsPage() {
           {stadiumTotalRows.length > 0 && (
             <div className={sectionClass}>
               <SectionHeader title="Most Watched Stadiums" href="/stadiums" />
-              <StadiumStatsTable stadiums={stadiumTotalRows} pageSize={10} defaultGender={defaultGender} />
+              <StadiumStatsTable stadiums={stadiumTotalRows} pageSize={10} />
             </div>
           )}
 
@@ -205,7 +194,7 @@ export default async function StatsPage() {
           {stadiumInPersonRows.length > 0 && (
             <div className={sectionClass}>
               <SectionHeader title="Most Watched Stadiums (In Person)" href="/stadiums/in-person" />
-              <StadiumStatsTable stadiums={stadiumInPersonRows} pageSize={10} matchesLabel="Visits" defaultGender={defaultGender} />
+              <StadiumStatsTable stadiums={stadiumInPersonRows} pageSize={10} matchesLabel="Visits" />
             </div>
           )}
 

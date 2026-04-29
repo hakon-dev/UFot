@@ -115,7 +115,7 @@ export default async function TeamPage({
           {teamPlayers.length > 0 && (
             <div className={cardClass}>
               <SectionHeader title="Most Watched Players" seeAllHref={`/teams/${idNum}/players`} />
-              <PlayerStatsTable players={teamPlayers} pageSize={10} defaultGender={classifyTeamGender(team.name)} />
+              <PlayerStatsTable players={teamPlayers} pageSize={10} defaultGender={classifyTeamGender(team.name)} showGenderToggle={false} />
             </div>
           )}
 

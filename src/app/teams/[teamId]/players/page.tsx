@@ -34,7 +34,7 @@ export default async function TeamPlayersPage({
       <h1 className="text-2xl font-bold text-white">{team.name} — All Players Watched</h1>
 
       <div className="bg-card rounded-xl p-5 border border-card-border">
-        <PlayerStatsTable players={players} pageSize={null} defaultGender={classifyTeamGender(team.name)} />
+        <PlayerStatsTable players={players} pageSize={null} defaultGender={classifyTeamGender(team.name)} showGenderToggle={false} />
       </div>
     </div>
   );

@@ -81,6 +81,36 @@ export function GenderToggle({
     { key: "women", label: "Women" },
     { key: "total", label: "Total" },
   ];
+  return <SegmentedToggle segments={segments} value={value} onChange={onChange} />;
+}
+
+export type TeamTypeFilter = "club" | "national" | "total";
+
+// Three-segment toggle for the merged Teams table — Club / National / Total.
+export function TeamTypeToggle({
+  value,
+  onChange,
+}: {
+  value: TeamTypeFilter;
+  onChange: (next: TeamTypeFilter) => void;
+}) {
+  const segments: { key: TeamTypeFilter; label: string }[] = [
+    { key: "club", label: "Club" },
+    { key: "national", label: "National" },
+    { key: "total", label: "Total" },
+  ];
+  return <SegmentedToggle segments={segments} value={value} onChange={onChange} />;
+}
+
+function SegmentedToggle<T extends string>({
+  segments,
+  value,
+  onChange,
+}: {
+  segments: { key: T; label: string }[];
+  value: T;
+  onChange: (next: T) => void;
+}) {
   return (
     <div className="inline-flex rounded-lg border border-card-border bg-surface p-0.5 text-xs">
       {segments.map((s) => {

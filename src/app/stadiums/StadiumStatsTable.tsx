@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
-  GenderToggle, HeaderButton, Pagination, usePagedRows,
-  type GenderFilter, type SortDir,
+  HeaderButton, Pagination, usePagedRows,
+  type SortDir,
 } from "@/app/stats/_components/TableUtils";
 
 export interface StadiumStat {
@@ -13,7 +13,6 @@ export interface StadiumStat {
   venueCity: string | null;
   matches: number;
   minutes: number;
-  gender: "men" | "women";
 }
 
 type SortKey = "stadium" | "city" | "minutes" | "matches";
@@ -38,16 +37,13 @@ export default function StadiumStatsTable({
   stadiums,
   pageSize = 10,
   matchesLabel = "Matches",
-  defaultGender = "men",
 }: {
   stadiums: StadiumStat[];
   pageSize?: number | null;
   matchesLabel?: string;
-  defaultGender?: "men" | "women";
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [gender, setGender] = useState<GenderFilter>(defaultGender);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -58,18 +54,15 @@ export default function StadiumStatsTable({
     }
   };
 
-  const sorted = useMemo(() => {
-    const byGender = gender === "total" ? stadiums : stadiums.filter((s) => s.gender === gender);
-    return [...byGender].sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [stadiums, sortKey, sortDir, gender]);
+  const sorted = useMemo(
+    () => [...stadiums].sort((a, b) => compare(a, b, sortKey, sortDir)),
+    [stadiums, sortKey, sortDir]
+  );
 
   const { page, setPage, pageCount, visible, startIndex } = usePagedRows(sorted, pageSize);
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <GenderToggle value={gender} onChange={setGender} />
-      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>

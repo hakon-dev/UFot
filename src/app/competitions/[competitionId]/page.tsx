@@ -135,13 +135,13 @@ export default async function CompetitionPage({
 
       <div className={sectionClass}>
         <SectionHeader title="Most Watched Teams" seeAllHref={`/competitions/${idNum}/teams`} />
-        <TeamStatsTable teams={teams} pageSize={10} defaultGender={defaultGender} />
+        <TeamStatsTable teams={teams} pageSize={10} defaultGender={defaultGender} showGenderToggle={false} />
       </div>
 
       {players.length > 0 && (
         <div className={sectionClass}>
           <SectionHeader title="Most Watched Players" seeAllHref={`/competitions/${idNum}/players`} />
-          <PlayerStatsTable players={players} pageSize={10} defaultGender={defaultGender} />
+          <PlayerStatsTable players={players} pageSize={10} defaultGender={defaultGender} showGenderToggle={false} />
         </div>
       )}
 
