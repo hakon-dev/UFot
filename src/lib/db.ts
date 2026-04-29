@@ -614,11 +614,22 @@ function likeQuery(q: string): string {
   return `%${q.toLowerCase().replace(/[%_]/g, (c) => "\\" + c)}%`;
 }
 
+// Cache search ordering: watched rows first (DESC by appearance count), then alphabetic. The
+// teams/players/competitions/coaches caches mix entries that the user has actually watched with
+// entries warmed by `/api/search` calls. Without a watched-count tiebreaker, alphabetic ordering
+// would stick an un-watched homonym above a Premier League regular.
 export function searchTeamsCache(q: string, limit = 8): TeamRecord[] {
   if (!q.trim()) return [];
   return db
     .prepare(
-      `SELECT * FROM teams WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+      `SELECT t.*, (
+         SELECT COUNT(*) FROM matches m
+         WHERE m.home_team_id = t.id OR m.away_team_id = t.id
+       ) AS watched_count
+       FROM teams t
+       WHERE LOWER(t.name) LIKE ? ESCAPE '\\'
+       ORDER BY watched_count DESC, t.name
+       LIMIT ?`
     )
     .all(likeQuery(q), limit) as TeamRecord[];
 }
@@ -627,7 +638,14 @@ export function searchPlayersCache(q: string, limit = 8): PlayerRecord[] {
   if (!q.trim()) return [];
   return db
     .prepare(
-      `SELECT * FROM players WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+      `SELECT p.*, (
+         SELECT COUNT(DISTINCT match_id) FROM match_lineups l
+         WHERE l.player_id = p.id
+       ) AS watched_count
+       FROM players p
+       WHERE LOWER(p.name) LIKE ? ESCAPE '\\'
+       ORDER BY watched_count DESC, p.name
+       LIMIT ?`
     )
     .all(likeQuery(q), limit) as PlayerRecord[];
 }
@@ -636,22 +654,30 @@ export function searchCompetitionsCache(q: string, limit = 8): CompetitionRecord
   if (!q.trim()) return [];
   return db
     .prepare(
-      `SELECT * FROM competitions WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+      `SELECT c.*, (
+         SELECT COUNT(*) FROM matches m WHERE m.competition_id = c.id
+       ) AS watched_count
+       FROM competitions c
+       WHERE LOWER(c.name) LIKE ? ESCAPE '\\'
+       ORDER BY watched_count DESC, c.name
+       LIMIT ?`
     )
     .all(likeQuery(q), limit) as CompetitionRecord[];
 }
 
 // Stadiums aren't a first-class cache table — they live as venue_id/venue/venue_city columns on
-// matches. Group by venue_id to avoid duplicates from multiple matches at the same ground.
+// matches. Group by venue_id to avoid duplicates from multiple matches at the same ground; rank
+// by visit count so a stadium watched five times outranks one watched once.
 export function searchStadiumsCache(q: string, limit = 8): StadiumSearchHit[] {
   if (!q.trim()) return [];
   return db
     .prepare(
-      `SELECT venue_id AS venueId, venue AS venueName, MAX(venue_city) AS venueCity
+      `SELECT venue_id AS venueId, venue AS venueName, MAX(venue_city) AS venueCity,
+              COUNT(*) AS watched_count
        FROM matches
        WHERE venue_id IS NOT NULL AND LOWER(venue) LIKE ? ESCAPE '\\'
        GROUP BY venue_id, venue
-       ORDER BY venue
+       ORDER BY watched_count DESC, venue
        LIMIT ?`
     )
     .all(likeQuery(q), limit) as StadiumSearchHit[];
@@ -661,7 +687,14 @@ export function searchCoachesCache(q: string, limit = 8): CoachRecord[] {
   if (!q.trim()) return [];
   return db
     .prepare(
-      `SELECT * FROM coaches WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?`
+      `SELECT c.*, (
+         SELECT COUNT(*) FROM matches m
+         WHERE m.home_coach_id = c.id OR m.away_coach_id = c.id
+       ) AS watched_count
+       FROM coaches c
+       WHERE LOWER(c.name) LIKE ? ESCAPE '\\'
+       ORDER BY watched_count DESC, c.name
+       LIMIT ?`
     )
     .all(likeQuery(q), limit) as CoachRecord[];
 }
