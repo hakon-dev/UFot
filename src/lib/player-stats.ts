@@ -730,6 +730,19 @@ export interface PlayerMatchAppearance {
   watchedInPerson: boolean;
 }
 
+export interface PlayerTeamSplit {
+  teamId: number | null;
+  teamName: string;
+  teamCrest: string | null;
+  teamRank: number | null;
+  minutes: number;
+  matches: number;
+  goals: number;
+  assists: number;
+  yellows: number;
+  reds: number;
+}
+
 export interface PlayerProfile {
   playerId: number;
   name: string;
@@ -743,6 +756,7 @@ export interface PlayerProfile {
   totalYellows: number;
   totalReds: number;
   appearances: PlayerMatchAppearance[];
+  byTeam: PlayerTeamSplit[];
 }
 
 export function getPlayerProfile(playerId: number): PlayerProfile | null {
@@ -849,6 +863,55 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
 
   appearances.sort((a, b) => (a.date < b.date ? 1 : -1));
 
+  const byTeamMap = new Map<string, PlayerTeamSplit>();
+  for (const a of appearances) {
+    const teamName = a.team === "home" ? a.homeTeam : a.awayTeam;
+    const teamCrest = a.team === "home" ? a.homeCrest : a.awayCrest;
+    const key = a.teamId != null ? `id:${a.teamId}` : `name:${teamName}`;
+    let s = byTeamMap.get(key);
+    if (!s) {
+      s = {
+        teamId: a.teamId, teamName, teamCrest, teamRank: null,
+        minutes: 0, matches: 0, goals: 0, assists: 0, yellows: 0, reds: 0,
+      };
+      byTeamMap.set(key, s);
+    }
+    s.minutes += a.minutesWatched;
+    s.matches += 1;
+    s.goals += a.goalsWatched;
+    s.assists += a.assistsWatched;
+    s.yellows += a.yellowsWatched;
+    s.reds += a.redsWatched;
+    if (!s.teamCrest && teamCrest) s.teamCrest = teamCrest;
+  }
+  const byTeam = [...byTeamMap.values()].sort((a, b) => b.minutes - a.minutes);
+
+  // For each team this player has appeared for, rank them within that team's "most-watched
+  // players" leaderboard (sorted by minutes desc, same ordering as /teams/[id] uses).
+  const matchesByTeam = new Map<number, MatchWithDetails[]>();
+  for (const m of matches) {
+    if (m.home_team_id != null) {
+      const arr = matchesByTeam.get(m.home_team_id) ?? [];
+      arr.push(m);
+      matchesByTeam.set(m.home_team_id, arr);
+    }
+    if (m.away_team_id != null && m.away_team_id !== m.home_team_id) {
+      const arr = matchesByTeam.get(m.away_team_id) ?? [];
+      arr.push(m);
+      matchesByTeam.set(m.away_team_id, arr);
+    }
+  }
+  for (const split of byTeam) {
+    if (split.teamId == null) continue;
+    const teamMatches = matchesByTeam.get(split.teamId);
+    if (!teamMatches || teamMatches.length === 0) continue;
+    const teamLeaderboard = computePlayerStats(teamMatches, { onlyTeamId: split.teamId });
+    const idx = teamLeaderboard.findIndex(
+      (s) => s.playerId === playerId || (s.playerId == null && knownNames.has(s.name))
+    );
+    if (idx !== -1) split.teamRank = idx + 1;
+  }
+
   return {
     playerId,
     name: latestName,
@@ -862,6 +925,7 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
     totalYellows: appearances.reduce((s, a) => s + a.yellowsWatched, 0),
     totalReds: appearances.reduce((s, a) => s + a.redsWatched, 0),
     appearances,
+    byTeam,
   };
 }
 

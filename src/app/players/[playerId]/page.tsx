@@ -5,6 +5,7 @@ import {
   type PlayerProfile, type PlayerTenure,
 } from "@/lib/player-stats";
 import PlayerPhoto from "./PlayerPhoto";
+import PlayerByTeamTable from "./PlayerByTeamTable";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
 import RankLine from "@/components/RankLine";
@@ -56,6 +57,13 @@ export default async function PlayerPage({
       </div>
 
       {profile ? <StatsGrid profile={profile} /> : null}
+
+      {profile && profile.byTeam.length > 0 && (
+        <div className={cardClass}>
+          <SectionHeader title="Stats by team" />
+          <PlayerByTeamTable rows={profile.byTeam} />
+        </div>
+      )}
 
       {profile && profile.appearances.length > 0 && (
         <div className={cardClass}>
