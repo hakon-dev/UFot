@@ -452,18 +452,21 @@ async function fetchPlayerSeasonRow(
   return null;
 }
 
-// Second-chance club lookup when /transfers has no data. Returns every unique team the player
-// appears under across the last few seasons, newest → oldest. We return the full list rather
-// than picking here because the caller has the `teams` cache (and therefore the national-team
-// flag) — e.g. for Ingrid Engen in season 2025 the API returns [Norway W ×4, Lyon W ×2], and
-// the caller needs to skip the national rows to land on Lyon W. Bounded at 3 seasons.
-export async function fetchPlayerCurrentTeam(
+export interface PlayerSeasonTeams {
+  season: number;
+  teams: Array<{ id: number; name: string; logo: string | null }>;
+}
+
+// Second-chance club lookup when /transfers has no data. Walks the last 3 seasons of
+// `/players?id=X&season=Y` and returns one entry per season with every team the player appeared
+// under that season. Bounded at 3 seasons. Callers either flatten this newest-first to pick a
+// most-recent club, or use it as a tenure-source for players whose transfers are empty.
+export async function fetchPlayerSeasonTeams(
   playerId: number
-): Promise<Array<{ id: number; name: string; logo: string | null }>> {
+): Promise<PlayerSeasonTeams[]> {
   const currentYear = new Date().getFullYear();
   const candidateSeasons = [currentYear, currentYear - 1, currentYear - 2];
-  const seen = new Set<number>();
-  const out: Array<{ id: number; name: string; logo: string | null }> = [];
+  const out: PlayerSeasonTeams[] = [];
   for (const season of candidateSeasons) {
     const res = await fetchApi(`/players?id=${playerId}&season=${season}`);
     // API-Football signals rate-limiting in two ways: HTTP 429, and HTTP 200 with a `rateLimit`
@@ -479,11 +482,32 @@ export async function fetchPlayerCurrentTeam(
     }
     const row = data.response?.[0];
     if (!row?.statistics?.length) continue;
+    const seenInSeason = new Set<number>();
+    const teams: Array<{ id: number; name: string; logo: string | null }> = [];
     for (const stat of row.statistics) {
       const t = stat.team;
-      if (t?.id && t?.name && !seen.has(t.id)) {
+      if (t?.id && t?.name && !seenInSeason.has(t.id)) {
+        seenInSeason.add(t.id);
+        teams.push({ id: t.id, name: t.name, logo: t.logo ?? null });
+      }
+    }
+    if (teams.length > 0) out.push({ season, teams });
+  }
+  return out;
+}
+
+// Flatten season-keyed teams to a deduped newest-first list. Same behaviour as the old
+// `fetchPlayerCurrentTeam` — used by the club-resolution path that just wants candidates.
+export function flattenSeasonTeams(
+  seasons: PlayerSeasonTeams[]
+): Array<{ id: number; name: string; logo: string | null }> {
+  const seen = new Set<number>();
+  const out: Array<{ id: number; name: string; logo: string | null }> = [];
+  for (const s of seasons) {
+    for (const t of s.teams) {
+      if (!seen.has(t.id)) {
         seen.add(t.id);
-        out.push({ id: t.id, name: t.name, logo: t.logo ?? null });
+        out.push(t);
       }
     }
   }

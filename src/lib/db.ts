@@ -288,6 +288,24 @@ db.exec(`
   )
 `);
 
+// Per-player squad history derived from /players?id=X&season=Y, kept across the seasons we
+// already fetch for the current-team fallback. One row per (player, season, team) so a player
+// who appeared for two clubs in one season (mid-season transfer, or club + national) gets two
+// rows. Used to synthesise tenures when /transfers is empty (Hegerberg, Vinicius, women's
+// players where API-Football's transfers endpoint has no coverage).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS player_seasons (
+    player_id INTEGER NOT NULL,
+    season INTEGER NOT NULL,
+    team_id INTEGER NOT NULL,
+    team_name TEXT,
+    team_logo TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (player_id, season, team_id)
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_player_seasons_player ON player_seasons(player_id)`);
+
 // One-shot migrations using SQLite's user_version pragma (not the schema-drift block below) —
 // guarantees each runs exactly once. Without this, rows whose API payload legitimately returns
 // null IDs (or no cards) would trigger a re-fetch on every server restart.
@@ -1393,6 +1411,61 @@ export function fetchedPlayerTransferIds(playerIds: number[]): Set<number> {
     .all(...playerIds) as { player_id: number }[];
   for (const row of rows) out.add(row.player_id);
   return out;
+}
+
+// Players whose transfers were last fetched more than `maxAgeDays` ago, capped at `limit`.
+// Used to refresh stale transfer histories — once a player has any rows we never naturally retry,
+// so a TTL-based refetch keeps Ronaldo/Haaland-style "moved clubs since last fetch" cases current.
+export function getStaleTransferPlayerIds(maxAgeDays: number, limit: number): number[] {
+  const rows = db
+    .prepare(
+      `SELECT player_id FROM player_transfer_fetches
+       WHERE fetched_at < datetime('now', ?)
+       ORDER BY fetched_at ASC
+       LIMIT ?`
+    )
+    .all(`-${maxAgeDays} days`, limit) as { player_id: number }[];
+  return rows.map((r) => r.player_id);
+}
+
+export interface PlayerSeasonRecord {
+  player_id: number;
+  season: number;
+  team_id: number;
+  team_name: string | null;
+  team_logo: string | null;
+  fetched_at: string;
+}
+
+export function getPlayerSeasons(playerId: number): PlayerSeasonRecord[] {
+  return db
+    .prepare(
+      "SELECT * FROM player_seasons WHERE player_id = ? ORDER BY season DESC, team_id ASC"
+    )
+    .all(playerId) as PlayerSeasonRecord[];
+}
+
+export function replacePlayerSeasons(
+  playerId: number,
+  rows: Array<{
+    season: number;
+    teamId: number;
+    teamName: string | null;
+    teamLogo: string | null;
+  }>
+): void {
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO player_seasons
+       (player_id, season, team_id, team_name, team_logo, fetched_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`
+  );
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM player_seasons WHERE player_id = ?").run(playerId);
+    for (const r of rows) {
+      insert.run(playerId, r.season, r.teamId, r.teamName, r.teamLogo);
+    }
+  });
+  tx();
 }
 
 export function replacePlayerTransfers(

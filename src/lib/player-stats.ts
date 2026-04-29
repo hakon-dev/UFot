@@ -1,11 +1,19 @@
-import type { Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard, PlayerTransferRecord } from "./db";
+import type {
+  Match, MatchGoal, MatchSubstitution, MatchLineup, MatchCard,
+  PlayerTransferRecord, PlayerSeasonRecord,
+} from "./db";
 import {
   getMatchesWithDetails, getPlayers, getAllCachedPlayers, upsertPlayer, upsertPlayerCurrentTeam,
   getPlayerTransfers, replacePlayerTransfers, hasFetchedPlayerTransfers,
+  getStaleTransferPlayerIds,
+  getPlayerSeasons, replacePlayerSeasons,
   nationalTeamIds, getTeams, upsertTeam, fetchedPlayerTransferIds,
 } from "./db";
 import { countryNameToCode } from "./country-codes";
-import { fetchPlayerProfile, fetchPlayerTransfers, fetchPlayerCurrentTeam, fetchTeamProfile } from "./football-api";
+import {
+  fetchPlayerProfile, fetchPlayerTransfers, fetchPlayerSeasonTeams, flattenSeasonTeams,
+  fetchTeamProfile,
+} from "./football-api";
 import { matchGender } from "./gender";
 
 export interface PlayerStat {
@@ -515,6 +523,39 @@ async function ensureTeamsClassified(
   );
 }
 
+// Refetch any player whose `/transfers` cache is older than `maxAgeDays`, bounded by `limit`.
+// Without this, once a player has any cached rows they'd never be revisited — Ronaldo's
+// transfers stop at the 2021 Juventus → Man Utd move because that's when we first fetched him,
+// and his Al-Nassr move (2023) never reached us. With a 30-day TTL the freshest moves get
+// pulled in within a month of being indexed by API-Football.
+async function refreshStaleTransfers(maxAgeDays: number, limit: number): Promise<void> {
+  if (limit <= 0) return;
+  const ids = getStaleTransferPlayerIds(maxAgeDays, limit);
+  if (ids.length === 0) return;
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const transfers = await fetchPlayerTransfers(id);
+        replacePlayerTransfers(
+          id,
+          transfers.map((t) => ({
+            transferDate: t.date,
+            type: t.type,
+            teamInId: t.teamIn.id,
+            teamInName: t.teamIn.name,
+            teamInLogo: t.teamIn.logo,
+            teamOutId: t.teamOut.id,
+            teamOutName: t.teamOut.name,
+            teamOutLogo: t.teamOut.logo,
+          }))
+        );
+      } catch {
+        // Rate-limited or network error — leave the cache alone so the next visit retries.
+      }
+    })
+  );
+}
+
 // A national team is never a club. `computePlayerStats` already skips national-team sides in
 // `recordClub`, but only when the team is cached with `national=1` at that moment. On a fresh
 // cache (or when stats are computed before team enrichment has run) a national team can still
@@ -528,11 +569,20 @@ export async function enrichPlayerStatsWithClub(
     maxTeamFetches?: number;
     maxTransferFetches?: number;
     maxSeasonFetches?: number;
+    maxStaleRefetches?: number;
+    staleRefetchAgeDays?: number;
   } = {}
 ): Promise<void> {
   const maxTeamFetches = options.maxTeamFetches ?? 10;
   const maxTransferFetches = options.maxTransferFetches ?? 15;
   const maxSeasonFetches = options.maxSeasonFetches ?? 8;
+  const maxStaleRefetches = options.maxStaleRefetches ?? 50;
+  const staleRefetchAgeDays = options.staleRefetchAgeDays ?? 30;
+
+  // Background TTL refresh: walk a chunk of stale transfer caches and refetch them. Keeps
+  // Ronaldo/Haaland-style "moved clubs since first fetch" cases current without ever
+  // re-rendering the page when a player happens to appear in the visible stats slice.
+  await refreshStaleTransfers(staleRefetchAgeDays, maxStaleRefetches);
 
   const currentClubIds = stats
     .map((s) => s.clubId)
@@ -664,14 +714,15 @@ export async function enrichPlayerStatsWithClub(
   if (toFetchSeason.length === 0) return;
 
   type FetchOutcome =
-    | { stat: PlayerStat; ok: true; teams: Array<{ id: number; name: string; logo: string | null }> }
+    | { stat: PlayerStat; ok: true; teams: Array<{ id: number; name: string; logo: string | null }>; bySeason: Awaited<ReturnType<typeof fetchPlayerSeasonTeams>> }
     | { stat: PlayerStat; ok: false };
 
   const fetched: FetchOutcome[] = await Promise.all(
     toFetchSeason.map(async (s): Promise<FetchOutcome> => {
       const pid = s.playerId as number;
       try {
-        const teams = await fetchPlayerCurrentTeam(pid);
+        const bySeason = await fetchPlayerSeasonTeams(pid);
+        const teams = flattenSeasonTeams(bySeason);
         // Ensure a players row exists before upsertPlayerCurrentTeam can UPDATE it. Most of
         // these rows already exist (nationality was cached earlier), but guard the edge case.
         if (!cachedPlayers.has(pid)) {
@@ -680,7 +731,13 @@ export async function enrichPlayerStatsWithClub(
             photo: null, position: null, shirtNumber: null,
           });
         }
-        return { stat: s, ok: true, teams };
+        // Persist the per-season squad data so /players/[id] can synthesize a club history
+        // even when /transfers has no coverage.
+        const rows = bySeason.flatMap((b) =>
+          b.teams.map((t) => ({ season: b.season, teamId: t.id, teamName: t.name, teamLogo: t.logo }))
+        );
+        replacePlayerSeasons(pid, rows);
+        return { stat: s, ok: true, teams, bySeason };
       } catch {
         // Rate-limited or network error. Do NOT persist — leaving current_team_fetched_at
         // untouched means the next stats-page load will retry.
@@ -1004,10 +1061,17 @@ export async function getPlayerHeader(
       };
     } else if (cache?.current_team_fetched_at == null && hasFetchedPlayerTransfers(playerId)) {
       try {
-        const candidates = await fetchPlayerCurrentTeam(playerId);
+        const bySeason = await fetchPlayerSeasonTeams(playerId);
+        const candidates = flattenSeasonTeams(bySeason);
         const candidateIds = candidates.map((c) => c.id);
         const nats = candidateIds.length > 0 ? nationalTeamIds(candidateIds) : new Set<number>();
         seasonTeam = candidates.find((c) => !nats.has(c.id)) ?? null;
+        // Persist the season squad data alongside the chosen current team so the player page's
+        // tenure fallback can use it next render without another API call.
+        const rows = bySeason.flatMap((b) =>
+          b.teams.map((t) => ({ season: b.season, teamId: t.id, teamName: t.name, teamLogo: t.logo }))
+        );
+        replacePlayerSeasons(playerId, rows);
         // Only persist on successful fetch. A throw (rate limit / network) leaves
         // current_team_fetched_at null so the next page load retries.
         upsertPlayerCurrentTeam(playerId, seasonTeam);
@@ -1066,7 +1130,9 @@ export interface PlayerTenure {
   clubId: number | null;
   clubName: string | null;
   clubLogo: string | null;
-  startDate: string;
+  // null when start is unknown — e.g., the player's first known club, derived from `team_out` of
+  // the earliest recorded transfer (we only know they left it on that date, not when they joined).
+  startDate: string | null;
   endDate: string | null;
   isLoan: boolean;
   isCurrent: boolean;
@@ -1075,39 +1141,181 @@ export interface PlayerTenure {
 // Fold a transfer list into one row per club spell. Consecutive spells at the same club stay as
 // separate rows (per the design: a return from loan is its own tenure). National-team rows are
 // filtered out because they belong on the nationality chip, not in club history.
+//
+// Beyond just walking `team_in`, we also (a) prepend the `team_out` of the oldest transfer as the
+// player's first known club — otherwise the very first club a player ever had never appears
+// (Haaland's Bryne, Ronaldo's Sporting CP); (b) detect mid-career gaps where transfer N+1's
+// `team_out` doesn't equal transfer N's `team_in`, and synthesize the missing tenure between them
+// (Sørloth: Crystal Palace→Gent, then Trabzonspor→RB Leipzig — Trabzonspor would otherwise vanish);
+// and (c) drop "Free agent" rows whose `team_in_id IS NULL` because API-Football sometimes stuffs
+// the player's own name into `team_in_name` for those, producing a fake club row.
 export function buildPlayerTenures(
   transfers: PlayerTransferHistoryEntry[],
   currentClubId: number | null
 ): PlayerTenure[] {
   if (transfers.length === 0) return [];
 
-  const teamInIds = transfers.map((t) => t.teamIn.id).filter((id): id is number => id != null);
-  const nationalIds = teamInIds.length > 0 ? nationalTeamIds(teamInIds) : new Set<number>();
+  // Flag national teams across both directions of every row, so we can skip national-team
+  // destinations AND avoid prepending/inserting a national `team_out` as a fake tenure.
+  const allTeamIds = transfers
+    .flatMap((t) => [t.teamIn.id, t.teamOut.id])
+    .filter((id): id is number => id != null);
+  const nationalIds = allTeamIds.length > 0 ? nationalTeamIds(allTeamIds) : new Set<number>();
 
-  const filtered = transfers
-    .filter((t) => t.teamIn.name && (t.teamIn.id == null || !nationalIds.has(t.teamIn.id)))
+  const isJunk = (t: PlayerTransferHistoryEntry): boolean =>
+    t.teamIn.id == null && (t.type ?? "").toLowerCase().includes("free agent");
+  const isNational = (id: number | null): boolean => id != null && nationalIds.has(id);
+
+  const sorted = transfers
+    .filter((t) => t.teamIn.name && !isJunk(t) && !isNational(t.teamIn.id))
     .slice()
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
+  // Collapse API duplicates: a single move sometimes appears as 2-3 separate rows on consecutive
+  // dates with different `type` strings ("Back from Loan", "Return from loan", "N/A"). Sancho's
+  // 2025 Chelsea → Man United loan return shows up three times. Drop any row whose
+  // (team_out_id, team_in_id) match the immediately preceding row's — the earliest record wins
+  // because that's likely the move's actual date.
+  const filtered: PlayerTransferHistoryEntry[] = [];
+  for (const t of sorted) {
+    const prev = filtered[filtered.length - 1];
+    if (
+      prev &&
+      prev.teamOut.id != null && t.teamOut.id != null && prev.teamOut.id === t.teamOut.id &&
+      prev.teamIn.id != null && t.teamIn.id != null && prev.teamIn.id === t.teamIn.id
+    ) {
+      continue;
+    }
+    filtered.push(t);
+  }
+
+  if (filtered.length === 0) return [];
+
   const tenures: PlayerTenure[] = [];
+
+  // Prepend the player's first known club: the `team_out` of the oldest recorded transfer.
+  const first = filtered[0];
+  if (first.teamOut.name && !isNational(first.teamOut.id)) {
+    tenures.push({
+      clubId: first.teamOut.id,
+      clubName: first.teamOut.name,
+      clubLogo: first.teamOut.logo,
+      startDate: null,
+      endDate: first.date,
+      isLoan: false,
+      isCurrent: false,
+    });
+  }
+
   for (let i = 0; i < filtered.length; i++) {
     const t = filtered[i];
     const next = filtered[i + 1];
     const isLast = i === filtered.length - 1;
     const matchesCurrent = currentClubId != null && t.teamIn.id === currentClubId;
+
+    // "Back from Loan" / "Return from loan" rows mean the player is returning to their parent
+    // club — those tenures are NOT loans, even though the type string contains "loan".
+    const typeLower = (t.type ?? "").toLowerCase();
+    const isLoan =
+      typeLower.includes("loan") &&
+      !typeLower.includes("return") &&
+      !typeLower.includes("back");
+
     tenures.push({
       clubId: t.teamIn.id,
       clubName: t.teamIn.name,
       clubLogo: t.teamIn.logo,
       startDate: t.date,
-      endDate: next ? next.date : isLast && matchesCurrent ? null : null,
-      isLoan: (t.type ?? "").toLowerCase().includes("loan"),
+      endDate: next ? next.date : null,
+      isLoan,
       isCurrent: isLast && matchesCurrent,
     });
+
+    // Bridge: if the next transfer's `team_out` doesn't match this transfer's `team_in`, the
+    // player passed through a club whose join+leave moves are missing from the API.
+    if (next && next.teamOut.name && !isNational(next.teamOut.id)) {
+      const sameById =
+        t.teamIn.id != null && next.teamOut.id != null && t.teamIn.id === next.teamOut.id;
+      const sameByName =
+        !sameById &&
+        t.teamIn.id == null &&
+        next.teamOut.id == null &&
+        t.teamIn.name === next.teamOut.name;
+      if (!sameById && !sameByName) {
+        tenures.push({
+          clubId: next.teamOut.id,
+          clubName: next.teamOut.name,
+          clubLogo: next.teamOut.logo,
+          startDate: t.date,
+          endDate: next.date,
+          isLoan: false,
+          isCurrent: false,
+        });
+      }
+    }
   }
 
   // Most recent first.
   return tenures.reverse();
+}
+
+// Synthesise a tenure list from per-season squad data. Used as a fallback for players whose
+// /transfers endpoint returns nothing on API-Football (Hegerberg, Vinicius, many women's-football
+// players). Each tenure spans the consecutive run of seasons the player appeared for that team.
+// We don't have real transfer dates, so dates are synthesised as "Jan 1 of first season" and
+// "Dec 31 of last season" — this is enough for the year-range labels in the UI.
+//
+// `currentSeason` lets the caller mark the most-recent in-progress tenure as `isCurrent` (renders
+// "present"). We don't try to detect mid-season transfers within a single season — the API
+// returns multiple teams per season but no ordering, so we just emit one tenure per club.
+export function buildPlayerTenuresFromSeasons(
+  rows: PlayerSeasonRecord[],
+  currentSeason: number
+): PlayerTenure[] {
+  if (rows.length === 0) return [];
+
+  const teamIds = [...new Set(rows.map((r) => r.team_id))];
+  const nationals = teamIds.length > 0 ? nationalTeamIds(teamIds) : new Set<number>();
+
+  // Group seasons per team, dropping national-team rows so they don't pollute club history.
+  const byTeam = new Map<number, { name: string | null; logo: string | null; seasons: number[] }>();
+  for (const r of rows) {
+    if (nationals.has(r.team_id)) continue;
+    let entry = byTeam.get(r.team_id);
+    if (!entry) {
+      entry = { name: r.team_name, logo: r.team_logo, seasons: [] };
+      byTeam.set(r.team_id, entry);
+    }
+    entry.seasons.push(r.season);
+    if (!entry.name && r.team_name) entry.name = r.team_name;
+    if (!entry.logo && r.team_logo) entry.logo = r.team_logo;
+  }
+
+  const tenures: PlayerTenure[] = [];
+  for (const [teamId, info] of byTeam) {
+    if (!info.name) continue;
+    const minSeason = Math.min(...info.seasons);
+    const maxSeason = Math.max(...info.seasons);
+    const isCurrent = info.seasons.includes(currentSeason);
+    tenures.push({
+      clubId: teamId,
+      clubName: info.name,
+      clubLogo: info.logo,
+      startDate: `${minSeason}-01-01`,
+      endDate: isCurrent ? null : `${maxSeason}-12-31`,
+      isLoan: false,
+      isCurrent,
+    });
+  }
+
+  // Most recent first.
+  tenures.sort((a, b) => {
+    const aDate = a.endDate ?? "9999";
+    const bDate = b.endDate ?? "9999";
+    if (aDate !== bDate) return bDate.localeCompare(aDate);
+    return (b.startDate ?? "").localeCompare(a.startDate ?? "");
+  });
+  return tenures;
 }
 
 // Read cache first; if we've never fetched this player's transfers, fetch once and persist.
@@ -1139,4 +1347,19 @@ export async function getPlayerTransferHistory(
   } catch {
     return [];
   }
+}
+
+// Build the player's club history, falling back to per-season squad data when /transfers is
+// empty (~140 cached players currently — typical for women's football, low-coverage leagues).
+// Reads cache only; does no fetching, since both the transfers and season caches are populated
+// elsewhere (page-load passes in `enrichPlayerStatsWithClub`, and this helper is called from
+// `/players/[id]` which already triggers `getPlayerHeader` → season fetch).
+export function getPlayerClubHistory(
+  playerId: number,
+  transfers: PlayerTransferHistoryEntry[],
+  currentClubId: number | null
+): PlayerTenure[] {
+  if (transfers.length > 0) return buildPlayerTenures(transfers, currentClubId);
+  const seasons = getPlayerSeasons(playerId);
+  return buildPlayerTenuresFromSeasons(seasons, new Date().getFullYear());
 }
