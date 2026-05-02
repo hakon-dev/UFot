@@ -80,12 +80,15 @@ export default function WatchedMatchRow({
       : null;
 
   const gridCols = gridColsFor(showExtras);
+  const rowTint = match.watchedInPerson
+    ? "bg-sky-500/20 hover:bg-sky-500/30"
+    : "hover:bg-surface";
 
   return (
     <div
       className={`
-        group relative grid items-center gap-x-3 text-sm px-2 py-2.5 transition-colors
-        hover:bg-surface
+        group relative grid items-center gap-x-3 text-sm px-2 py-2.5 rounded-md transition-colors
+        ${rowTint}
         ${gridCols}
       `}
     >
@@ -157,6 +160,18 @@ export default function WatchedMatchRow({
         />
       </div>
 
+      {/* In-person pill (fixed-width column; collapses to empty when absent) */}
+      <div className="flex items-center justify-center">
+        {match.watchedInPerson ? (
+          <span
+            className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-sky-400 text-black"
+            title="Watched in person"
+          >
+            In person
+          </span>
+        ) : null}
+      </div>
+
       {/* Minutes */}
       <span className="text-xs text-muted tabular-nums text-right">
         {match.minutesWatched}′
@@ -172,18 +187,6 @@ export default function WatchedMatchRow({
         </>
       ) : null}
 
-      {/* In-person pill (collapses when absent) */}
-      <div className="flex items-center justify-end">
-        {match.watchedInPerson ? (
-          <span
-            className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10"
-            title="Watched in person"
-          >
-            In person
-          </span>
-        ) : null}
-      </div>
-
       {/* Date — visual only; row overlay handles the click. */}
       <span className="text-xs text-muted tabular-nums text-right whitespace-nowrap transition-colors group-hover:text-accent">
         {new Date(match.date).toLocaleDateString("en-GB", {
@@ -197,9 +200,13 @@ export default function WatchedMatchRow({
 }
 
 function gridColsFor(showExtras: boolean): string {
+  // The "In person" pill column is fixed-width (not `auto`) so rows with and without
+  // the pill share identical column layouts; otherwise the auto column collapses to 0
+  // on plain rows and team-name columns shift between rows.
+  // Order: Res | Home | Score | Away | InPerson | Min | (G A Y R) | Date
   return showExtras
-    ? "grid-cols-[2rem_minmax(0,1fr)_auto_minmax(0,1fr)_3rem_1.75rem_1.75rem_1.75rem_1.75rem_auto_4.5rem]"
-    : "grid-cols-[2rem_minmax(0,1fr)_auto_minmax(0,1fr)_3rem_auto_4.5rem]";
+    ? "grid-cols-[2rem_minmax(0,1fr)_auto_minmax(0,1fr)_5.5rem_3rem_1.75rem_1.75rem_1.75rem_1.75rem_4.5rem]"
+    : "grid-cols-[2rem_minmax(0,1fr)_auto_minmax(0,1fr)_5.5rem_3rem_4.5rem]";
 }
 
 export function WatchedMatchRowHeader({ showExtras = false }: { showExtras?: boolean }) {
@@ -218,6 +225,7 @@ export function WatchedMatchRowHeader({ showExtras = false }: { showExtras?: boo
       <span className={`${cell} text-right`}>Home</span>
       <span />
       <span className={`${cell} text-left`}>Away</span>
+      <span />
       <span className={`${cell} text-right`}>Min</span>
       {showExtras ? (
         <>
@@ -227,7 +235,6 @@ export function WatchedMatchRowHeader({ showExtras = false }: { showExtras?: boo
           <span className={`${cell} text-right`}>R</span>
         </>
       ) : null}
-      <span />
       <span className={`${cell} text-right`}>Date</span>
     </div>
   );

@@ -691,7 +691,14 @@ export function getAllMatches(): Match[] {
 }
 
 export function getMatch(id: string): Match | undefined {
-  return db.prepare("SELECT * FROM matches WHERE id = ?").get(id) as Match | undefined;
+  return db
+    .prepare(
+      `SELECT m.*, c.logo AS competition_logo
+       FROM matches m
+       LEFT JOIN competitions c ON c.id = m.competition_id
+       WHERE m.id = ?`
+    )
+    .get(id) as Match | undefined;
 }
 
 export function getMatchByExternalId(

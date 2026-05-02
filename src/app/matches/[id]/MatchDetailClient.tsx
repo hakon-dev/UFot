@@ -89,6 +89,7 @@ interface Props {
   awayTeamId: number | null;
   homeCoach: CoachProp | null;
   awayCoach: CoachProp | null;
+  refereeName: string | null;
 }
 
 function GoalTypeIcon({ type }: { type: string | null }) {
@@ -162,6 +163,7 @@ export default function MatchDetailClient({
   awayTeamId,
   homeCoach,
   awayCoach,
+  refereeName,
 }: Props) {
   const [details, setDetails] = useState<MatchDetails | null>(null);
   const [loading, setLoading] = useState(false);
@@ -432,9 +434,10 @@ export default function MatchDetailClient({
                 awayStarters={awayStarters.map(toPitchPlayer)}
                 getAnnotations={getAnnotations}
               />
-              {(homeCoach || awayCoach) && (
-                <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-card-border/50">
+              {(homeCoach || awayCoach || refereeName) && (
+                <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-card-border/50 items-center">
                   <CoachBadge coach={homeCoach} align="left" />
+                  <RefereeBadge name={refereeName} />
                   <CoachBadge coach={awayCoach} align="right" />
                 </div>
               )}
@@ -530,6 +533,26 @@ function CoachBadge({ coach, align }: { coach: CoachProp | null; align: "left" |
           {avatar}
         </>
       )}
+    </Link>
+  );
+}
+
+function RefereeBadge({ name }: { name: string | null }) {
+  // Empty cell keeps the 3-col grid balanced when the referee is unknown.
+  if (!name) return <div />;
+  return (
+    <Link
+      href={`/referees/${encodeURIComponent(name)}`}
+      className="flex flex-col items-center gap-1 min-w-0 hover:text-accent transition-colors text-center"
+    >
+      <p className="text-[10px] uppercase tracking-wide text-muted leading-tight">Referee</p>
+      <span className="inline-flex items-center gap-1.5 text-sm text-slate-200 truncate">
+        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+        <span className="truncate">{name}</span>
+      </span>
     </Link>
   );
 }

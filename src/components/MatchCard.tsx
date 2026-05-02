@@ -59,6 +59,7 @@ export default function MatchCard({ match }: { match: Match }) {
   const hadExtraTime = match.had_extra_time === 1;
   const hadPenalties = match.had_penalties === 1;
   const watchedPenalties = match.watched_penalties === 1;
+  const inPerson = match.watched_in_person === 1;
   // A 90-min match is "full" at 90; a 120-min match needs 120 to be "full".
   const fullMatchThreshold = hadExtraTime ? 120 : 90;
   const isFullMatch = minutes >= fullMatchThreshold;
@@ -81,8 +82,12 @@ export default function MatchCard({ match }: { match: Match }) {
 
   // The card is split into a main Link covering the score/teams area and sibling Links for the
   // competition badge — nesting <a> inside <a> is invalid HTML, so the outer wrapper is a div.
+  // In-person matches get an amber-tinted card so they stand out in the feed.
+  const cardClass = inPerson
+    ? "block bg-sky-500/20 rounded-xl p-6 border border-sky-400/70 hover:border-sky-400 transition-colors group"
+    : "block bg-card rounded-xl p-6 border border-card-border hover:border-card-hover transition-colors group";
   return (
-    <div className="block bg-card rounded-xl p-6 border border-card-border hover:border-card-hover transition-colors group">
+    <div className={cardClass}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0 space-y-5">
           <Link href={`/matches/${match.id}`} className="block space-y-4">
@@ -158,23 +163,26 @@ export default function MatchCard({ match }: { match: Match }) {
             {(match.venue || match.watched_in_person === 1) && (
               <div className="ml-auto inline-flex items-center gap-2">
                 {match.venue && (
-                  match.venue_id != null ? (
-                    <Link
-                      href={`/stadiums/${match.venue_id}`}
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-card-border bg-surface text-slate-200 hover:text-accent hover:border-accent/40 transition-colors"
-                    >
-                      <StadiumIcon />
+                  <Link
+                    href={
+                      match.venue_id != null
+                        ? `/stadiums/${match.venue_id}`
+                        : `/stadiums/by-name/${encodeURIComponent(match.venue)}`
+                    }
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-card-border bg-surface text-slate-200 hover:text-accent hover:border-accent/40 transition-colors"
+                  >
+                    <StadiumIcon />
+                    <span>
                       {match.venue}
-                    </Link>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-card-border bg-surface text-slate-200">
-                      <StadiumIcon />
-                      {match.venue}
+                      {match.venue_city ? ` · ${match.venue_city}` : ""}
                     </span>
-                  )
+                  </Link>
                 )}
-                {match.watched_in_person === 1 && (
-                  <span className="uppercase tracking-wide text-[10px] font-semibold px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+                {inPerson && (
+                  <span className="inline-flex items-center gap-1 uppercase tracking-wide text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-400 text-black">
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                    </svg>
                     In person
                   </span>
                 )}
