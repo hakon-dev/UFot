@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import WatchIntervalEditor from "@/components/WatchIntervalEditor";
 import PitchLineup, { type PitchPlayer, type PlayerAnnotations } from "@/components/PitchLineup";
 
@@ -89,8 +89,6 @@ interface Props {
   awayTeamId: number | null;
   homeCoach: CoachProp | null;
   awayCoach: CoachProp | null;
-  /** Slot rendered between the Watch Intervals card and the match-details sections. */
-  postIntervalsSlot?: ReactNode;
 }
 
 function GoalTypeIcon({ type }: { type: string | null }) {
@@ -164,7 +162,6 @@ export default function MatchDetailClient({
   awayTeamId,
   homeCoach,
   awayCoach,
-  postIntervalsSlot,
 }: Props) {
   const [details, setDetails] = useState<MatchDetails | null>(null);
   const [loading, setLoading] = useState(false);
@@ -364,8 +361,6 @@ export default function MatchDetailClient({
           Watched in person at the stadium
         </label>
       </div>
-
-      {postIntervalsSlot}
 
       {/* Loading state */}
       {loading && (
