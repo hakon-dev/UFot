@@ -176,10 +176,17 @@ export default function WatchIntervalEditor({
           />
           {/* End-of-90 marker (only shown when the timeline extends into extra time) */}
           {matchLength === 120 && (
-            <div
-              className="absolute top-0 h-full w-px bg-black/70"
-              style={{ left: `${(90 / maxMinute) * 100}%` }}
-            />
+            <>
+              <div
+                className="absolute top-0 h-full w-px bg-black/70"
+                style={{ left: `${(90 / maxMinute) * 100}%` }}
+              />
+              {/* ET half-time marker (between the two 15-minute halves of extra time) */}
+              <div
+                className="absolute top-0 h-full w-px bg-black/50"
+                style={{ left: `${(105 / maxMinute) * 100}%` }}
+              />
+            </>
           )}
         </div>
         {/* Minute labels — below the bar for readability */}
@@ -200,10 +207,10 @@ export default function WatchIntervalEditor({
                 90&apos;
               </span>
               <span
-                className="absolute top-0 -translate-x-1/2 text-accent uppercase tracking-wider text-[9px] font-semibold"
-                style={{ left: `${((90 + (maxMinute - 90) / 2) / maxMinute) * 100}%` }}
+                className="absolute top-0 -translate-x-1/2"
+                style={{ left: `${(105 / maxMinute) * 100}%` }}
               >
-                ET
+                105&apos;
               </span>
             </>
           )}
