@@ -46,12 +46,15 @@ export default function TeamStatsTable({
   defaultGender = "men",
   showTypeToggle = false,
   showGenderToggle = true,
+  hrefTemplate,
 }: {
   teams: TeamStat[];
   pageSize?: number | null;
   defaultGender?: "men" | "women";
   showTypeToggle?: boolean;
   showGenderToggle?: boolean;
+  /** URL with `{id}` placeholder for the team id. Defaults to `/teams/{id}`. */
+  hrefTemplate?: string;
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("minutes");
@@ -160,7 +163,7 @@ export default function TeamStatsTable({
                   <td className="py-2.5 text-center text-muted tabular-nums">{startIndex + i + 1}</td>
                   <td className="py-2.5 text-slate-200 font-medium">
                     {t.teamId != null ? (
-                      <Link href={`/teams/${t.teamId}`} className="hover:text-accent transition-colors block max-w-full">
+                      <Link href={hrefTemplate ? hrefTemplate.replace("{id}", String(t.teamId)) : `/teams/${t.teamId}`} className="hover:text-accent transition-colors block max-w-full">
                         {cellInner}
                       </Link>
                     ) : (

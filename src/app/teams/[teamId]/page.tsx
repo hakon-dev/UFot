@@ -1,9 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { classifyNationalTeam, getTeamProfile, getTeamPlayers } from "@/lib/team-stats";
+import {
+  classifyNationalTeam,
+  enrichTeamRecordsWithCountry,
+  getTeamProfile,
+  getTeamPlayers,
+  getTeamOpponents,
+} from "@/lib/team-stats";
 import { enrichPlayerStatsWithNationality, enrichPlayerStatsWithClub } from "@/lib/player-stats";
 import { classifyTeamGender } from "@/lib/gender";
 import PlayerStatsTable from "@/app/stats/PlayerStatsTable";
+import TeamStatsTable from "@/app/stats/TeamStatsTable";
 import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList";
 import SectionHeader from "@/components/SectionHeader";
 import RankLine from "@/components/RankLine";
@@ -37,6 +44,9 @@ export default async function TeamPage({
   const teamPlayers = getTeamPlayers(idNum);
   await enrichPlayerStatsWithNationality(teamPlayers);
   await enrichPlayerStatsWithClub(teamPlayers);
+
+  const opponents = getTeamOpponents(idNum);
+  await enrichTeamRecordsWithCountry(opponents);
 
   const cardClass = "bg-card rounded-xl p-5 border border-card-border";
 
@@ -116,6 +126,19 @@ export default async function TeamPage({
             <div className={cardClass}>
               <SectionHeader title="Most Watched Players" seeAllHref={`/teams/${idNum}/players`} />
               <PlayerStatsTable players={teamPlayers} pageSize={10} defaultGender={classifyTeamGender(team.name)} showGenderToggle={false} />
+            </div>
+          )}
+
+          {opponents.length > 0 && (
+            <div className={cardClass}>
+              <SectionHeader title="Most Watched Opponents" />
+              <TeamStatsTable
+                teams={opponents}
+                pageSize={10}
+                defaultGender={classifyTeamGender(team.name)}
+                showGenderToggle={false}
+                hrefTemplate={`/teams/${idNum}/vs/{id}`}
+              />
             </div>
           )}
 

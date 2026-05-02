@@ -3,6 +3,8 @@ import { getAllMatches, getMatchesWithDetails, getTeams, upsertTeam } from "./db
 import { countryNameToCode } from "./country-codes";
 import { computePlayerStats, type PlayerStat } from "./player-stats";
 import { fetchTeamProfile } from "./football-api";
+import { aggregateTeams } from "./stats-aggregation";
+import type { TeamStat } from "@/app/stats/TeamStatsTable";
 
 export interface TeamMatchAppearance {
   matchId: string;
@@ -239,4 +241,15 @@ export function getTeamPlayers(teamId: number): PlayerStat[] {
     (m) => m.home_team_id === teamId || m.away_team_id === teamId
   );
   return computePlayerStats(mine, { onlyTeamId: teamId });
+}
+
+// Most-watched opponents: aggregate every team appearing in this team's matches, then drop
+// the team itself + any rows that didn't get a teamId (legacy/manual entries) so the table
+// stays clickable.
+export function getTeamOpponents(teamId: number): TeamStat[] {
+  const matches = getAllMatches();
+  const mine = matches.filter(
+    (m) => m.home_team_id === teamId || m.away_team_id === teamId
+  );
+  return aggregateTeams(mine).filter((t) => t.teamId != null && t.teamId !== teamId);
 }

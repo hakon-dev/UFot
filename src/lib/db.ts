@@ -696,6 +696,34 @@ export function getMatchesByVenueId(venueId: number): Match[] {
     .all(venueId) as Match[];
 }
 
+export function getMatchesBetweenTeams(teamAId: number, teamBId: number): Match[] {
+  return db
+    .prepare(
+      `SELECT * FROM matches
+       WHERE (home_team_id = ? AND away_team_id = ?)
+          OR (home_team_id = ? AND away_team_id = ?)
+       ORDER BY date DESC, created_at DESC`
+    )
+    .all(teamAId, teamBId, teamBId, teamAId) as Match[];
+}
+
+// Most-frequent venue_id for matches where this team was the home side. Used to detect
+// neutral-ground meetings on the head-to-head page: if a match's venue isn't the home
+// team's regular ground, it's treated as neutral. Returns null when the team has no
+// recorded home matches with a venue_id.
+export function getTeamHomeVenue(teamId: number): number | null {
+  const row = db
+    .prepare(
+      `SELECT venue_id FROM matches
+       WHERE home_team_id = ? AND venue_id IS NOT NULL
+       GROUP BY venue_id
+       ORDER BY COUNT(*) DESC, venue_id ASC
+       LIMIT 1`
+    )
+    .get(teamId) as { venue_id: number } | undefined;
+  return row?.venue_id ?? null;
+}
+
 // Name-based fallback for venues that API-Football didn't return an id for (and our
 // `/venues?search=` lookup couldn't resolve either). Case-insensitive exact match on the
 // free-text `venue` column so manual entries and api-rows-without-id both surface here.
