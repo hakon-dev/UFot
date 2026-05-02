@@ -145,6 +145,20 @@ export default function WatchIntervalEditor({
       {/* Timeline visualization */}
       <div className="space-y-1.5">
         <div className="relative h-7 bg-background rounded-md overflow-hidden border border-card-border">
+          {/* Extra-time region tint — sits behind the watched bars so the 90–120 range reads
+              as visually distinct from regulation, regardless of which intervals the user has
+              selected. Diagonal stripes keep it readable even when the watched bar covers it. */}
+          {matchLength === 120 && (
+            <div
+              className="absolute top-0 h-full"
+              style={{
+                left: `${(90 / maxMinute) * 100}%`,
+                width: `${((maxMinute - 90) / maxMinute) * 100}%`,
+                backgroundImage:
+                  "repeating-linear-gradient(45deg, rgba(255,255,255,0.06) 0 4px, transparent 4px 8px)",
+              }}
+            />
+          )}
           {active.map(([s, e], i) => (
             <div
               key={i}
@@ -163,7 +177,7 @@ export default function WatchIntervalEditor({
           {/* End-of-90 marker (only shown when the timeline extends into extra time) */}
           {matchLength === 120 && (
             <div
-              className="absolute top-0 h-full w-px bg-black/50"
+              className="absolute top-0 h-full w-px bg-black/70"
               style={{ left: `${(90 / maxMinute) * 100}%` }}
             />
           )}
@@ -178,12 +192,20 @@ export default function WatchIntervalEditor({
             45&apos;
           </span>
           {matchLength === 120 && (
-            <span
-              className="absolute top-0 -translate-x-1/2"
-              style={{ left: `${(90 / maxMinute) * 100}%` }}
-            >
-              90&apos;
-            </span>
+            <>
+              <span
+                className="absolute top-0 -translate-x-1/2"
+                style={{ left: `${(90 / maxMinute) * 100}%` }}
+              >
+                90&apos;
+              </span>
+              <span
+                className="absolute top-0 -translate-x-1/2 text-accent uppercase tracking-wider text-[9px] font-semibold"
+                style={{ left: `${((90 + (maxMinute - 90) / 2) / maxMinute) * 100}%` }}
+              >
+                ET
+              </span>
+            </>
           )}
           <span className="absolute right-0 top-0">{maxMinute}&apos;</span>
         </div>

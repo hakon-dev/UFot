@@ -571,6 +571,20 @@ if (userVersion < 13) {
   }
   db.pragma("user_version = 13");
 }
+//   v14 — `had_extra_time` / `had_penalties` columns were added to track AET/PEN status.
+//        Existing api-football rows have `had_extra_time = 0` (the column default), so an
+//        AET final added before this feature still renders a 90-minute timeline. Flip
+//        details_complete=0 for every api-football row so the rescue loop re-hydrates them
+//        and `saveMatchDetails` picks up the AET/PEN flags from the same /fixtures?id=X
+//        call we already make. The rescue loop is bounded (5 matches per stats-page visit
+//        = 15 API requests) so this drains gradually rather than spiking the budget.
+if (userVersion < 14) {
+  db.exec(`
+    UPDATE matches SET details_complete = 0
+    WHERE external_source = 'api-football' AND details_fetched = 1
+  `);
+  db.pragma("user_version = 14");
+}
 
 // NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null
 // home_formation or any sub with null player_in_id and purged the match's details so the
