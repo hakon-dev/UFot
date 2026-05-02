@@ -451,10 +451,10 @@ export async function enrichPlayerStatsWithNationality(
     }
   }
 
-  // Fetch missing ones, bounded by maxFetches to respect the 100/day API budget. We don't
+  // Fetch missing ones, bounded by maxFetches to keep per-page latency reasonable. We don't
   // retry cached-but-still-abbreviated entries: `fetchPlayerProfile` already runs its full
   // resolution pipeline (profiles → expand → season fallback), so a cached abbreviation is
-  // the best we can get and retrying would only burn API budget.
+  // the best we can get and retrying would only burn API budget for no gain.
   const toFetch = stats
     .filter((s) => s.playerId != null && !cached.has(s.playerId))
     .slice(0, maxFetches);

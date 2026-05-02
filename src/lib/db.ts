@@ -392,7 +392,7 @@ if (userVersion < 8) {
 //   v9 — referee + coach columns added on `matches` and a `coaches` cache table introduced.
 //        Existing api-football rows have NULL coach/referee fields. Flip details_complete=0
 //        so the rescue loop re-hydrates them and picks up the new fields. Each match costs
-//        3 API requests; bounded by hydratePendingMatches limits + the 100/day cap. Rows
+//        3 API requests; bounded by hydratePendingMatches limits. Rows
 //        whose API response still doesn't include a coach (lineups not posted, etc.) will
 //        flip back to complete=0 on retry — that's fine, they'll keep the partial data.
 if (userVersion < 9) {

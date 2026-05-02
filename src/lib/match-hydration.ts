@@ -89,7 +89,8 @@ export async function hydrateMatchDetails(matchId: string): Promise<boolean> {
 
 // Backfill up to `limit` matches that were added but never had their details fetched (e.g.
 // the user bailed before the detail page loaded, or the POST-time fetch hit a transient
-// error). Bounded because each match = 3 api-football requests and the free tier is 100/day.
+// error). Bounded because each match = 3 api-football requests; per-page latency matters more
+// than the daily 7500-request cap.
 export async function hydratePendingMatches(limit: number): Promise<number> {
   const ids = getPendingHydrationIds(limit);
   if (ids.length === 0) return 0;

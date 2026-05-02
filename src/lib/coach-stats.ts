@@ -5,7 +5,7 @@ import { fetchCoachProfile } from "./football-api";
 import { minutesOf } from "./stats-aggregation";
 
 // Cache + lazy-fetch nationalities for coach aggregates. Mirrors enrichPlayerStatsWithNationality
-// but for coaches. Bounded so the 100/day API budget can't get exhausted by a single page load.
+// but for coaches. Bounded to keep per-page latency reasonable.
 export async function enrichCoachAggregatesWithNationality(
   aggregates: CoachAggregate[],
   options: { maxFetches?: number } = {}
