@@ -238,12 +238,12 @@ export function computePlayerStats(
 
       if (lineup.is_starter === 1) {
         playerStart = 0;
-        playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? 90;
+        playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? (match.had_extra_time === 1 ? 120 : 90);
       } else {
         const subInMinute = lookupSubMinute(subbedIn, lineup.player_id, lineup.player_name);
         if (subInMinute === undefined) continue;
         playerStart = subInMinute;
-        playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? 90;
+        playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? (match.had_extra_time === 1 ? 120 : 90);
       }
 
       const overlap = intervalOverlap(playerStart, playerEnd, watchIntervals);
@@ -866,12 +866,12 @@ export function getPlayerProfile(playerId: number): PlayerProfile | null {
     let playerEnd: number;
     if (lineup.is_starter === 1) {
       playerStart = 0;
-      playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? 90;
+      playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? (match.had_extra_time === 1 ? 120 : 90);
     } else {
       const subInMinute = lookupSubMinute(subbedIn, lineup.player_id, lineup.player_name);
       if (subInMinute === undefined) continue;
       playerStart = subInMinute;
-      playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? 90;
+      playerEnd = lookupSubMinute(subbedOut, lineup.player_id, lineup.player_name) ?? (match.had_extra_time === 1 ? 120 : 90);
     }
 
     const minutesWatched = intervalOverlap(playerStart, playerEnd, watchIntervals);

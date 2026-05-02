@@ -9,15 +9,20 @@ interface WatchIntervalEditorProps {
   onChange: (intervals: number[][]) => void;
   /** Optional match ID — if set, editor gates edits behind Edit/Save/Cancel with a confirm prompt. */
   matchId?: string;
+  /**
+   * Total length of the match in minutes (90 for regulation, 120 for matches that went to
+   * extra time). Drives the "Full match" toggle and timeline labels. Defaults to 90.
+   */
+  matchLength?: 90 | 120;
 }
 
 function totalMinutes(intervals: number[][]): number {
   return intervals.reduce((sum, [s, e]) => sum + (e - s), 0);
 }
 
-function isValid(intervals: number[][]): boolean {
+function isValid(intervals: number[][], maxEnd: number): boolean {
   return intervals.every(
-    ([s, e]) => Number.isFinite(s) && Number.isFinite(e) && s >= 0 && e <= 120 && s < e
+    ([s, e]) => Number.isFinite(s) && Number.isFinite(e) && s >= 0 && e <= maxEnd && s < e
   );
 }
 
@@ -29,7 +34,12 @@ function sameIntervals(a: number[][], b: number[][]): boolean {
   return true;
 }
 
-export default function WatchIntervalEditor({ intervals, onChange, matchId }: WatchIntervalEditorProps) {
+export default function WatchIntervalEditor({
+  intervals,
+  onChange,
+  matchId,
+  matchLength = 90,
+}: WatchIntervalEditorProps) {
   const confirmMode = matchId != null;
   const [editing, setEditing] = useState(!confirmMode);
   const [draft, setDraft] = useState<number[][]>(intervals);
@@ -44,8 +54,12 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
   }, [intervals, editing, confirmMode]);
 
   const active = editing ? draft : intervals;
-  const isFullMatch = active.length === 1 && active[0][0] === 0 && active[0][1] === 90;
-  const maxMinute = Math.max(90, ...active.map(([, e]) => e));
+  const isFullMatch =
+    active.length === 1 && active[0][0] === 0 && active[0][1] === matchLength;
+  // Always render at least up to matchLength so a 120-minute timeline isn't squished when the
+  // user has only entered a 0–45 interval; if the user enters a value past matchLength (which
+  // validation rejects but the input still shows), expand the bar to fit.
+  const maxMinute = Math.max(matchLength, ...active.map(([, e]) => e));
   const dirty = !sameIntervals(draft, intervals);
 
   function propagate(next: number[][]) {
@@ -57,13 +71,13 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
   }
 
   function toggleFullMatch() {
-    propagate(isFullMatch ? [[0, 45]] : [[0, 90]]);
+    propagate(isFullMatch ? [[0, 45]] : [[0, matchLength]]);
   }
 
   function addInterval() {
     const last = active[active.length - 1];
-    const start = last ? Math.min(last[1], 119) : 0;
-    const end = Math.min(start + 15, 120);
+    const start = last ? Math.min(last[1], matchLength - 1) : 0;
+    const end = Math.min(start + 15, matchLength);
     if (start < end) {
       propagate([...active, [start, end]]);
     }
@@ -97,8 +111,10 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
   }
 
   async function saveEdit() {
-    if (!isValid(draft)) {
-      setError("Intervals must be within 0–120 and each end must be greater than its start.");
+    if (!isValid(draft, matchLength)) {
+      setError(
+        `Intervals must be within 0–${matchLength} and each end must be greater than its start.`
+      );
       return;
     }
     if (!dirty) {
@@ -144,6 +160,13 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
             className="absolute top-0 h-full w-px bg-black/50"
             style={{ left: `${(45 / maxMinute) * 100}%` }}
           />
+          {/* End-of-90 marker (only shown when the timeline extends into extra time) */}
+          {matchLength === 120 && (
+            <div
+              className="absolute top-0 h-full w-px bg-black/50"
+              style={{ left: `${(90 / maxMinute) * 100}%` }}
+            />
+          )}
         </div>
         {/* Minute labels — below the bar for readability */}
         <div className="relative h-3.5 text-[11px] text-slate-300 tabular-nums">
@@ -154,6 +177,14 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
           >
             45&apos;
           </span>
+          {matchLength === 120 && (
+            <span
+              className="absolute top-0 -translate-x-1/2"
+              style={{ left: `${(90 / maxMinute) * 100}%` }}
+            >
+              90&apos;
+            </span>
+          )}
           <span className="absolute right-0 top-0">{maxMinute}&apos;</span>
         </div>
       </div>
@@ -201,7 +232,7 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
             <button
               type="button"
               onClick={saveEdit}
-              disabled={saving || !isValid(draft)}
+              disabled={saving || !isValid(draft, matchLength)}
               className="text-xs px-3 py-1.5 rounded-full bg-accent text-black font-semibold hover:bg-accent-dim transition-colors disabled:opacity-40"
             >
               {saving ? "Saving..." : "Save"}
@@ -223,7 +254,7 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
               <input
                 type="number"
                 min={0}
-                max={119}
+                max={matchLength - 1}
                 value={Number.isFinite(s) ? s : ""}
                 onChange={(ev) => {
                   const v = ev.target.value;
@@ -235,7 +266,7 @@ export default function WatchIntervalEditor({ intervals, onChange, matchId }: Wa
               <input
                 type="number"
                 min={1}
-                max={120}
+                max={matchLength}
                 value={Number.isFinite(e) ? e : ""}
                 onChange={(ev) => {
                   const v = ev.target.value;

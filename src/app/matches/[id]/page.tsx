@@ -63,14 +63,18 @@ export default async function MatchDetailPage({
     day: "numeric",
   });
 
+  const hadExtraTime = match.had_extra_time === 1;
+  const matchLength: 90 | 120 = hadExtraTime ? 120 : 90;
+  const defaultIntervals = hadExtraTime ? "[[0,120]]" : "[[0,90]]";
   let watchIntervals: number[][];
   try {
-    watchIntervals = JSON.parse(match.watch_intervals || "[[0,90]]");
+    watchIntervals = JSON.parse(match.watch_intervals || defaultIntervals);
   } catch {
-    watchIntervals = [[0, 90]];
+    watchIntervals = hadExtraTime ? [[0, 120]] : [[0, 90]];
   }
 
   const minutes = watchIntervals.reduce((sum, [s, e]) => sum + (e - s), 0);
+  const isFullMatch = minutes >= matchLength;
 
   // Pull coach photos from the coaches cache; the match record already carries id+name. Photos
   // ride along on the same query as the rest of the cache lookup so this stays a single hit.
@@ -99,8 +103,18 @@ export default async function MatchDetailPage({
       {/* Match header */}
       <div className="bg-card rounded-xl p-6 border border-card-border space-y-4">
         <p className="text-muted text-sm">
-          {minutes < 90 ? `You watched ${minutes} min on ` : "You watched on "}
+          {isFullMatch ? "You watched on " : `You watched ${minutes} min on `}
           <span className="text-slate-300">{dateStr}</span>
+          {hadExtraTime && (
+            <span className="ml-2 text-[10px] uppercase tracking-wide font-semibold text-accent">
+              {match.had_penalties === 1 ? "AET · Pens" : "AET"}
+            </span>
+          )}
+          {match.had_penalties === 1 && match.watched_penalties === 1 && (
+            <span className="ml-2 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+              + pens watched
+            </span>
+          )}
         </p>
 
         {/* Teams and score */}
@@ -203,6 +217,9 @@ export default async function MatchDetailPage({
         canFetchDetails={match.external_match_id !== null && match.external_source === "api-football"}
         initialIntervals={watchIntervals}
         initialWatchedInPerson={match.watched_in_person === 1}
+        matchLength={matchLength}
+        hadPenalties={match.had_penalties === 1}
+        initialWatchedPenalties={match.watched_penalties === 1}
         homeTeam={match.home_team}
         awayTeam={match.away_team}
         homeTeamId={match.home_team_id}

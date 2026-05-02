@@ -24,6 +24,8 @@ interface MatchSearchResult {
   venueCity: string | null;
   homeCrest: string;
   awayCrest: string;
+  hadExtraTime: boolean;
+  hadPenalties: boolean;
 }
 
 function readSessionSummary(externalId: string): MatchSearchResult | null {
@@ -46,8 +48,18 @@ export default function FixturePreviewPage() {
   const [loading, setLoading] = useState(true);
   const [intervals, setIntervals] = useState<number[][]>([[0, 90]]);
   const [watchedInPerson, setWatchedInPerson] = useState(false);
+  // Default true: if the user is on this preview page, the natural action is to mark the
+  // shootout as watched along with the rest of the match. They can untick before confirming.
+  const [watchedPenalties, setWatchedPenalties] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  // When the summary loads (or the user navigates between fixtures), seed the default watch
+  // length to match the actual played length: 120 minutes for AET / PEN, 90 otherwise.
+  useEffect(() => {
+    if (!summary) return;
+    setIntervals(summary.hadExtraTime ? [[0, 120]] : [[0, 90]]);
+  }, [summary]);
 
   useEffect(() => {
     if (!externalId) return;
@@ -111,6 +123,9 @@ export default function FixturePreviewPage() {
           competitionId: summary.competitionCode ? Number(summary.competitionCode) : undefined,
           watchIntervals: intervals,
           watchedInPerson,
+          hadExtraTime: summary.hadExtraTime,
+          hadPenalties: summary.hadPenalties,
+          watchedPenalties: summary.hadPenalties && watchedPenalties,
         }),
       });
       if (!res.ok) {
@@ -209,7 +224,30 @@ export default function FixturePreviewPage() {
           Confirm the minutes you watched, then add it to your feed.
         </p>
 
-        <WatchIntervalEditor intervals={intervals} onChange={setIntervals} />
+        <WatchIntervalEditor
+          intervals={intervals}
+          onChange={setIntervals}
+          matchLength={summary.hadExtraTime ? 120 : 90}
+        />
+
+        {summary.hadExtraTime && (
+          <p className="text-xs text-accent/80 mt-2">
+            This match went to {summary.hadPenalties ? "extra time and penalties" : "extra time"}.
+            A full match here is 120 minutes.
+          </p>
+        )}
+
+        {summary.hadPenalties && (
+          <label className="flex items-center gap-2.5 mt-4 text-sm text-slate-200 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={watchedPenalties}
+              onChange={(e) => setWatchedPenalties(e.target.checked)}
+              className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+            />
+            Watched the penalty shootout
+          </label>
+        )}
 
         <label className="flex items-center gap-2.5 mt-4 text-sm text-slate-200 cursor-pointer select-none">
           <input

@@ -103,6 +103,19 @@ if (!columnNames.includes("away_coach_id")) {
 if (!columnNames.includes("away_coach_name")) {
   db.exec("ALTER TABLE matches ADD COLUMN away_coach_name TEXT");
 }
+// Extra time / penalty shootout state. `had_extra_time` is set whenever the match went past 90
+// minutes (API status AET or PEN); `had_penalties` is set when a shootout was needed (PEN
+// only). `watched_penalties` is the user's bit — defaulted to 1 when the user marks the match
+// as fully watched at add-time but separately togglable from the match-detail page.
+if (!columnNames.includes("had_extra_time")) {
+  db.exec("ALTER TABLE matches ADD COLUMN had_extra_time INTEGER DEFAULT 0");
+}
+if (!columnNames.includes("had_penalties")) {
+  db.exec("ALTER TABLE matches ADD COLUMN had_penalties INTEGER DEFAULT 0");
+}
+if (!columnNames.includes("watched_penalties")) {
+  db.exec("ALTER TABLE matches ADD COLUMN watched_penalties INTEGER DEFAULT 0");
+}
 // `details_fetched` only records that we *tried* to hydrate. `details_complete` records that the
 // payload we got back was actually full. Splitting the two lets us retry partially-fetched rows
 // (lineups not yet posted, events still trickling in) without making the match invisible to
@@ -601,6 +614,9 @@ export interface Match {
   away_coach_id: number | null;
   away_coach_name: string | null;
   venue_search_attempted: number;
+  had_extra_time: number;
+  had_penalties: number;
+  watched_penalties: number;
   competition_logo?: string | null;
 }
 
@@ -695,13 +711,18 @@ export function createMatch(data: {
   venueId?: number;
   venueCity?: string;
   watchedInPerson?: boolean;
+  hadExtraTime?: boolean;
+  hadPenalties?: boolean;
+  watchedPenalties?: boolean;
 }): Match {
   const id = crypto.randomUUID();
-  const intervals = JSON.stringify(data.watchIntervals ?? [[0, 90]]);
+  const hadExtraTime = data.hadExtraTime === true;
+  const defaultIntervals = hadExtraTime ? [[0, 120]] : [[0, 90]];
+  const intervals = JSON.stringify(data.watchIntervals ?? defaultIntervals);
   const source = data.externalMatchId != null ? (data.externalSource ?? "api-football") : null;
   const stmt = db.prepare(`
-    INSERT INTO matches (id, home_team, away_team, home_score, away_score, competition, round, date, venue, home_crest, away_crest, external_match_id, external_source, watch_intervals, home_team_id, away_team_id, competition_id, venue_id, venue_city, watched_in_person)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO matches (id, home_team, away_team, home_score, away_score, competition, round, date, venue, home_crest, away_crest, external_match_id, external_source, watch_intervals, home_team_id, away_team_id, competition_id, venue_id, venue_city, watched_in_person, had_extra_time, had_penalties, watched_penalties)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(
     id, data.homeTeam, data.awayTeam, data.homeScore, data.awayScore,
@@ -711,7 +732,10 @@ export function createMatch(data: {
     data.homeTeamId ?? null, data.awayTeamId ?? null,
     data.competitionId ?? null,
     data.venueId ?? null, data.venueCity || null,
-    data.watchedInPerson ? 1 : 0
+    data.watchedInPerson ? 1 : 0,
+    hadExtraTime ? 1 : 0,
+    data.hadPenalties === true ? 1 : 0,
+    data.watchedPenalties === true ? 1 : 0
   );
   return db.prepare("SELECT * FROM matches WHERE id = ?").get(id) as Match;
 }
@@ -722,6 +746,10 @@ export function updateWatchIntervals(matchId: string, intervals: number[][]): vo
 
 export function updateMatchWatchedInPerson(matchId: string, watched: boolean): void {
   db.prepare("UPDATE matches SET watched_in_person = ? WHERE id = ?").run(watched ? 1 : 0, matchId);
+}
+
+export function updateMatchWatchedPenalties(matchId: string, watched: boolean): void {
+  db.prepare("UPDATE matches SET watched_penalties = ? WHERE id = ?").run(watched ? 1 : 0, matchId);
 }
 
 // Set the resolved venue id for a match (from a `/venues?search=` lookup) and mark the lookup
@@ -1204,6 +1232,8 @@ export function saveMatchDetails(
     venueId?: number | null;
     venueName?: string | null;
     venueCity?: string | null;
+    hadExtraTime?: boolean | null;
+    hadPenalties?: boolean | null;
   }
 ): void {
   const insertGoal = db.prepare(
@@ -1369,7 +1399,9 @@ export function saveMatchDetails(
           away_coach_name = COALESCE(?, away_coach_name),
           venue_id = COALESCE(?, venue_id),
           venue = COALESCE(?, venue),
-          venue_city = COALESCE(?, venue_city)
+          venue_city = COALESCE(?, venue_city),
+          had_extra_time = COALESCE(?, had_extra_time),
+          had_penalties = COALESCE(?, had_penalties)
         WHERE id = ?`
       ).run(
         complete,
@@ -1385,6 +1417,8 @@ export function saveMatchDetails(
         metaToUse.venueId ?? null,
         metaToUse.venueName ?? null,
         metaToUse.venueCity ?? null,
+        metaToUse.hadExtraTime == null ? null : metaToUse.hadExtraTime ? 1 : 0,
+        metaToUse.hadPenalties == null ? null : metaToUse.hadPenalties ? 1 : 0,
         matchId
       );
 

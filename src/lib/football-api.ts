@@ -55,6 +55,12 @@ export interface MatchSearchResult {
   venueCity: string | null;
   homeCrest: string;
   awayCrest: string;
+  // True when the match went to extra time (status AET or PEN). Drives the default
+  // "Full match" length on the add-match flow (90 vs 120).
+  hadExtraTime: boolean;
+  // True when the match went to a penalty shootout (status PEN). Used to expose the
+  // "Watched the penalty shootout" toggle.
+  hadPenalties: boolean;
 }
 
 function getApiKey(): string {
@@ -80,6 +86,7 @@ function toMatchResult(
   f: ApiFootballFixture,
   timeZone: string
 ): MatchSearchResult {
+  const status = f.fixture.status.short;
   return {
     id: f.fixture.id,
     homeTeam: f.teams.home.name,
@@ -98,6 +105,8 @@ function toMatchResult(
     venueCity: f.fixture.venue.city ?? null,
     homeCrest: f.teams.home.logo,
     awayCrest: f.teams.away.logo,
+    hadExtraTime: status === "AET" || status === "PEN",
+    hadPenalties: status === "PEN",
   };
 }
 
@@ -231,6 +240,8 @@ export interface MatchDetailResult {
   venueId: number | null;
   venueName: string | null;
   venueCity: string | null;
+  hadExtraTime: boolean | null;
+  hadPenalties: boolean | null;
 }
 
 function toCoachInfo(lineup: ApiFootballLineup | undefined): CoachInfo {
@@ -809,6 +820,16 @@ export async function fetchMatchDetails(
     venueId: fixture.response[0]?.fixture.venue.id ?? null,
     venueName: fixture.response[0]?.fixture.venue.name ?? null,
     venueCity: fixture.response[0]?.fixture.venue.city ?? null,
+    hadExtraTime: (() => {
+      const s = fixture.response[0]?.fixture.status.short;
+      if (!s) return null;
+      return s === "AET" || s === "PEN";
+    })(),
+    hadPenalties: (() => {
+      const s = fixture.response[0]?.fixture.status.short;
+      if (!s) return null;
+      return s === "PEN";
+    })(),
   };
 }
 

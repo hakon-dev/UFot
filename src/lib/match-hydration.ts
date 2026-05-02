@@ -77,6 +77,8 @@ export async function hydrateMatchDetails(matchId: string): Promise<boolean> {
         venueId: details.venueId,
         venueName: details.venueName,
         venueCity: details.venueCity,
+        hadExtraTime: details.hadExtraTime,
+        hadPenalties: details.hadPenalties,
       }
     );
     return true;

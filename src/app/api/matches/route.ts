@@ -30,6 +30,9 @@ export async function POST(request: NextRequest) {
     venueId: body.venueId || undefined,
     venueCity: body.venueCity || undefined,
     watchedInPerson: body.watchedInPerson === true,
+    hadExtraTime: body.hadExtraTime === true,
+    hadPenalties: body.hadPenalties === true,
+    watchedPenalties: body.watchedPenalties === true,
   });
 
   // Eager-fetch details so stats/player/team aggregations see this match immediately —

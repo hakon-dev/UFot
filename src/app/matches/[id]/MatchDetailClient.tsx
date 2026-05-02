@@ -80,6 +80,9 @@ interface Props {
   canFetchDetails: boolean;
   initialIntervals: number[][];
   initialWatchedInPerson: boolean;
+  matchLength: 90 | 120;
+  hadPenalties: boolean;
+  initialWatchedPenalties: boolean;
   homeTeam: string;
   awayTeam: string;
   homeTeamId: number | null;
@@ -150,6 +153,9 @@ export default function MatchDetailClient({
   canFetchDetails,
   initialIntervals,
   initialWatchedInPerson,
+  matchLength,
+  hadPenalties,
+  initialWatchedPenalties,
   homeTeam,
   awayTeam,
   homeTeamId,
@@ -163,6 +169,8 @@ export default function MatchDetailClient({
   const [intervals, setIntervals] = useState(initialIntervals);
   const [watchedInPerson, setWatchedInPerson] = useState(initialWatchedInPerson);
   const [stadiumSaving, setStadiumSaving] = useState(false);
+  const [watchedPenalties, setWatchedPenalties] = useState(initialWatchedPenalties);
+  const [penaltiesSaving, setPenaltiesSaving] = useState(false);
 
   async function saveWatchedInPerson(next: boolean) {
     setWatchedInPerson(next);
@@ -188,6 +196,20 @@ export default function MatchDetailClient({
       return;
     }
     saveWatchedInPerson(next);
+  }
+
+  async function saveWatchedPenalties(next: boolean) {
+    setWatchedPenalties(next);
+    setPenaltiesSaving(true);
+    try {
+      await fetch(`/api/matches/${matchId}/penalties`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ watchedPenalties: next }),
+      });
+    } finally {
+      setPenaltiesSaving(false);
+    }
   }
 
   useEffect(() => {
@@ -313,7 +335,20 @@ export default function MatchDetailClient({
           intervals={intervals}
           onChange={setIntervals}
           matchId={matchId}
+          matchLength={matchLength}
         />
+        {hadPenalties && (
+          <label className="flex items-center gap-2.5 mt-4 text-sm text-slate-200 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={watchedPenalties}
+              onChange={(e) => saveWatchedPenalties(e.target.checked)}
+              disabled={penaltiesSaving}
+              className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+            />
+            Watched the penalty shootout
+          </label>
+        )}
         <label className="flex items-center gap-2.5 mt-4 text-sm text-slate-200 cursor-pointer select-none">
           <input
             type="checkbox"

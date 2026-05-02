@@ -56,6 +56,12 @@ function getWatchMinutes(match: Match): number {
 export default function MatchCard({ match }: { match: Match }) {
   const router = useRouter();
   const minutes = getWatchMinutes(match);
+  const hadExtraTime = match.had_extra_time === 1;
+  const hadPenalties = match.had_penalties === 1;
+  const watchedPenalties = match.watched_penalties === 1;
+  // A 90-min match is "full" at 90; a 120-min match needs 120 to be "full".
+  const fullMatchThreshold = hadExtraTime ? 120 : 90;
+  const isFullMatch = minutes >= fullMatchThreshold;
 
   async function handleDelete(e: React.MouseEvent) {
     e.preventDefault();
@@ -82,7 +88,17 @@ export default function MatchCard({ match }: { match: Match }) {
           <Link href={`/matches/${match.id}`} className="block space-y-4">
             {/* Watch description */}
             <p className="text-muted text-base">
-              {minutes >= 90 ? "You watched the full match" : `You watched ${minutes} min`} on <span className="text-slate-300">{dateStr}</span>
+              {isFullMatch ? "You watched the full match" : `You watched ${minutes} min`} on <span className="text-slate-300">{dateStr}</span>
+              {hadExtraTime && (
+                <span className="ml-2 text-[10px] uppercase tracking-wide font-semibold text-accent">
+                  {hadPenalties ? "AET · Pens" : "AET"}
+                </span>
+              )}
+              {hadPenalties && watchedPenalties && (
+                <span className="ml-2 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+                  + pens
+                </span>
+              )}
             </p>
 
             {/* Teams centered with bigger crests */}

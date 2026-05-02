@@ -10,6 +10,9 @@ export default function MatchForm() {
   const [submitting, setSubmitting] = useState(false);
   const [watchIntervals, setWatchIntervals] = useState<number[][]>([[0, 90]]);
   const [watchedInPerson, setWatchedInPerson] = useState(false);
+  const [hadExtraTime, setHadExtraTime] = useState(false);
+  const [hadPenalties, setHadPenalties] = useState(false);
+  const [watchedPenalties, setWatchedPenalties] = useState(true);
   const [formData, setFormData] = useState({
     homeTeam: "",
     awayTeam: "",
@@ -27,6 +30,26 @@ export default function MatchForm() {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   }
 
+  function toggleExtraTime(next: boolean) {
+    setHadExtraTime(next);
+    if (!next) {
+      setHadPenalties(false);
+      // Snap a default-shaped [[0,120]] back to [[0,90]]; leave any custom segments alone.
+      setWatchIntervals((prev) =>
+        prev.length === 1 && prev[0][0] === 0 && prev[0][1] === 120 ? [[0, 90]] : prev
+      );
+    } else {
+      setWatchIntervals((prev) =>
+        prev.length === 1 && prev[0][0] === 0 && prev[0][1] === 90 ? [[0, 120]] : prev
+      );
+    }
+  }
+
+  function togglePenalties(next: boolean) {
+    setHadPenalties(next);
+    if (next) setHadExtraTime(true);
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);
@@ -34,7 +57,14 @@ export default function MatchForm() {
     await fetch("/api/matches", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...formData, watchIntervals, watchedInPerson }),
+      body: JSON.stringify({
+        ...formData,
+        watchIntervals,
+        watchedInPerson,
+        hadExtraTime,
+        hadPenalties,
+        watchedPenalties: hadPenalties && watchedPenalties,
+      }),
     });
 
     router.push("/");
@@ -130,12 +160,47 @@ export default function MatchForm() {
             </label>
           </div>
 
+          {/* Match length */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-white">Match Length</h3>
+            <label className="flex items-center gap-2.5 text-sm text-slate-200 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={hadExtraTime}
+                onChange={(e) => toggleExtraTime(e.target.checked)}
+                className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+              />
+              Went to extra time (120 minutes)
+            </label>
+            <label className="flex items-center gap-2.5 text-sm text-slate-200 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={hadPenalties}
+                onChange={(e) => togglePenalties(e.target.checked)}
+                className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+              />
+              Decided on penalties
+            </label>
+            {hadPenalties && (
+              <label className="flex items-center gap-2.5 text-sm text-slate-200 cursor-pointer select-none ml-6">
+                <input
+                  type="checkbox"
+                  checked={watchedPenalties}
+                  onChange={(e) => setWatchedPenalties(e.target.checked)}
+                  className="w-4 h-4 rounded border-card-border bg-surface accent-accent"
+                />
+                Watched the shootout
+              </label>
+            )}
+          </div>
+
           {/* Watch Intervals */}
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-white">Watch Intervals</h3>
             <WatchIntervalEditor
               intervals={watchIntervals}
               onChange={setWatchIntervals}
+              matchLength={hadExtraTime ? 120 : 90}
             />
           </div>
 
