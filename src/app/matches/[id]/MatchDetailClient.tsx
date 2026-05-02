@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import WatchIntervalEditor from "@/components/WatchIntervalEditor";
 import PitchLineup, { type PitchPlayer, type PlayerAnnotations } from "@/components/PitchLineup";
+import { formatPosition } from "@/lib/format-position";
 
 interface Goal {
   minute: number;
@@ -75,6 +76,14 @@ interface CoachProp {
   photo: string | null;
 }
 
+interface BenchAnnotations {
+  goals: number[];
+  assists: number[];
+  yellow: number | null;
+  red: number | null;
+  subOn: number | null;
+}
+
 interface Props {
   matchId: string;
   canFetchDetails: boolean;
@@ -93,8 +102,8 @@ interface Props {
 }
 
 function GoalTypeIcon({ type }: { type: string | null }) {
-  if (type === "OWN_GOAL") return <span className="text-red-400 text-xs">(OG)</span>;
-  if (type === "PENALTY") return <span className="text-muted text-xs">(P)</span>;
+  if (type === "OWN_GOAL") return <span className="text-red-400 text-xs ml-1">(OG)</span>;
+  if (type === "PENALTY") return <span className="text-muted text-xs ml-1">(P)</span>;
   return null;
 }
 
@@ -108,32 +117,107 @@ function toPitchPlayer(l: Lineup): PitchPlayer {
   };
 }
 
-function BenchList({ players, label }: { players: Lineup[]; label: string }) {
-  if (players.length === 0) return null;
+function BenchPlayerEntry({
+  player,
+  annotations,
+  side,
+}: {
+  player: Lineup;
+  annotations: BenchAnnotations;
+  side: "home" | "away";
+}) {
+  const cameOn = annotations.subOn != null;
+
+  const chips = (
+    <>
+      {cameOn && (
+        <span className="inline-flex items-center gap-0.5 text-green-400 text-xs shrink-0">
+          <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+          </svg>
+          <span className="tabular-nums">{annotations.subOn}&apos;</span>
+        </span>
+      )}
+      {annotations.goals.map((m, i) => (
+        <span key={`g${i}`} className="inline-flex items-center gap-0.5 text-xs text-slate-200 shrink-0">
+          <BenchBallIcon />
+          <span className="tabular-nums">{m}&apos;</span>
+        </span>
+      ))}
+      {annotations.assists.map((m, i) => (
+        <span key={`a${i}`} className="inline-flex items-center gap-0.5 text-xs text-muted shrink-0">
+          <BenchBootIcon />
+          <span className="tabular-nums">{m}&apos;</span>
+        </span>
+      ))}
+      {annotations.yellow != null && (
+        <span className="inline-flex items-center gap-0.5 text-xs text-muted shrink-0">
+          <span className="w-2 h-2.5 rounded-[1px] bg-yellow-400 shrink-0" />
+          <span className="tabular-nums">{annotations.yellow}&apos;</span>
+        </span>
+      )}
+      {annotations.red != null && (
+        <span className="inline-flex items-center gap-0.5 text-xs text-muted shrink-0">
+          <span className="w-2 h-2.5 rounded-[1px] bg-red-500 shrink-0" />
+          <span className="tabular-nums">{annotations.red}&apos;</span>
+        </span>
+      )}
+    </>
+  );
+
+  const nameRow = (
+    <span className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm ${cameOn ? "text-slate-200" : "text-muted"}`}>
+      {player.shirt_number !== null && (
+        <span className="tabular-nums w-6 text-right text-muted shrink-0">{player.shirt_number}</span>
+      )}
+      <span className="truncate">{player.player_name}</span>
+      {formatPosition(player.position) && (
+        <span className="text-xs text-muted shrink-0">({formatPosition(player.position)})</span>
+      )}
+      {chips}
+    </span>
+  );
+
   return (
-    <div>
-      <p className="text-xs text-muted mb-2">{label}</p>
-      <div className="space-y-1">
-        {players.map((p, i) => {
-          const content = (
-            <span className="flex items-center gap-2 text-sm text-muted">
-              {p.shirt_number !== null && (
-                <span className="tabular-nums w-6 text-right">{p.shirt_number}</span>
-              )}
-              <span>{p.player_name}</span>
-              {p.position && <span className="text-xs">({p.position})</span>}
-            </span>
-          );
-          return p.player_id != null ? (
-            <Link key={i} href={`/players/${p.player_id}`} className="block hover:text-accent transition-colors">
-              {content}
-            </Link>
-          ) : (
-            <div key={i}>{content}</div>
-          );
-        })}
-      </div>
+    <div className={`min-w-0 ${side === "home" ? "text-right" : "text-left"}`}>
+      {player.player_id != null ? (
+        <Link href={`/players/${player.player_id}`} className="block hover:text-accent transition-colors">
+          {nameRow}
+        </Link>
+      ) : (
+        nameRow
+      )}
     </div>
+  );
+}
+
+function BenchBallIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="w-3 h-3 shrink-0" aria-hidden="true">
+      <circle cx="8" cy="8" r="7" fill="#ffffff" stroke="#111" strokeWidth="0.8" />
+      <polygon points="8,4.2 10.8,6.2 9.7,9.5 6.3,9.5 5.2,6.2" fill="#111" />
+      <path
+        d="M8 1.2 L8 4.2 M14.8 8 L10.8 6.2 M1.2 8 L5.2 6.2 M4.2 14 L6.3 9.5 M11.8 14 L9.7 9.5"
+        stroke="#111"
+        strokeWidth="0.8"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+function BenchBootIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="w-3 h-3 shrink-0" aria-hidden="true">
+      <path
+        d="M2 9 L2 11.5 Q2 12.5 3 12.5 L13 12.5 Q14 12.5 14 11.5 L14 10.2 Q14 9.2 13 9 L9.5 8.5 Q8.5 8.3 8.2 7.5 L7 4.5 Q6.7 3.7 5.7 3.7 L4.3 3.7 Q3.3 3.7 3.3 4.7 L3.3 8.2 Q3.3 8.8 2.8 8.9 Z"
+        fill="currentColor"
+      />
+      <circle cx="3.8" cy="13.2" r="0.6" fill="currentColor" />
+      <circle cx="6.5" cy="13.2" r="0.6" fill="currentColor" />
+      <circle cx="9.5" cy="13.2" r="0.6" fill="currentColor" />
+      <circle cx="12.2" cy="13.2" r="0.6" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -236,18 +320,56 @@ export default function MatchDetailClient({
   const homeLineup = details?.lineups?.filter((l) => l.team === "home") ?? [];
   const awayLineup = details?.lineups?.filter((l) => l.team === "away") ?? [];
   const homeStarters = homeLineup.filter((l) => l.is_starter === 1);
-  const homeBench = homeLineup.filter((l) => l.is_starter === 0);
   const awayStarters = awayLineup.filter((l) => l.is_starter === 1);
-  const awayBench = awayLineup.filter((l) => l.is_starter === 0);
 
   const resolvedHomeTeamId = details?.homeTeamId ?? homeTeamId;
   const resolvedAwayTeamId = details?.awayTeamId ?? awayTeamId;
 
-  const homeSubs = details?.substitutions?.filter((s) => s.team === homeTeam) ?? [];
-  const awaySubs = details?.substitutions?.filter((s) => s.team === awayTeam) ?? [];
+  const sortedGoals = useMemo(
+    () => [...(details?.goals ?? [])].sort((a, b) => a.minute - b.minute),
+    [details?.goals],
+  );
+  const sortedSubs = useMemo(
+    () => [...(details?.substitutions ?? [])].sort((a, b) => a.minute - b.minute),
+    [details?.substitutions],
+  );
 
-  const homeCards = details?.cards?.filter((c) => c.team === homeTeam) ?? [];
-  const awayCards = details?.cards?.filter((c) => c.team === awayTeam) ?? [];
+  // Sort bench: subbed-in players first (by sub-on minute ascending), then unused subs.
+  const subOnByPlayer = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of details?.substitutions ?? []) {
+      const key = s.player_in_id != null ? `id:${s.player_in_id}:${s.team}` : `name:${s.player_in}:${s.team}`;
+      if (!map.has(key)) map.set(key, s.minute);
+    }
+    return map;
+  }, [details?.substitutions]);
+
+  function benchSubOnMinute(p: Lineup): number | null {
+    const teamName = p.team === "home" ? homeTeam : awayTeam;
+    const idKey = p.player_id != null ? `id:${p.player_id}:${teamName}` : null;
+    const nameKey = `name:${p.player_name}:${teamName}`;
+    if (idKey && subOnByPlayer.has(idKey)) return subOnByPlayer.get(idKey)!;
+    if (subOnByPlayer.has(nameKey)) return subOnByPlayer.get(nameKey)!;
+    return null;
+  }
+
+  function sortBench(rows: Lineup[]): Lineup[] {
+    return [...rows].sort((a, b) => {
+      const am = benchSubOnMinute(a);
+      const bm = benchSubOnMinute(b);
+      if (am != null && bm != null) return am - bm;
+      if (am != null) return -1;
+      if (bm != null) return 1;
+      return 0;
+    });
+  }
+
+  const homeBench = sortBench(homeLineup.filter((l) => l.is_starter === 0));
+  const awayBench = sortBench(awayLineup.filter((l) => l.is_starter === 0));
+  const sortedCards = useMemo(
+    () => [...(details?.cards ?? [])].sort((a, b) => a.minute - b.minute),
+    [details?.cards],
+  );
 
   // Build a per-player annotations lookup (keyed by player_id, fallback to name).
   const getAnnotations = useMemo(() => {
@@ -328,6 +450,53 @@ export default function MatchDetailClient({
     };
   }, [details, homeTeam, awayTeam]);
 
+  const getBenchAnnotations = useMemo(() => {
+    const goals = details?.goals ?? [];
+    const subs = details?.substitutions ?? [];
+    const cards = details?.cards ?? [];
+
+    function keyFor(id: number | null, name: string): string {
+      return id != null ? `id:${id}` : `name:${name}`;
+    }
+
+    return (player: Lineup, side: "home" | "away"): BenchAnnotations => {
+      const playerKey = keyFor(player.player_id, player.player_name);
+      const teamName = side === "home" ? homeTeam : awayTeam;
+
+      const scored: number[] = [];
+      const assisted: number[] = [];
+      for (const g of goals) {
+        if (g.team !== teamName && g.type !== "OWN_GOAL") continue;
+        if (keyFor(g.scorer_id, g.scorer_name) === playerKey && g.type !== "OWN_GOAL") {
+          scored.push(g.minute);
+        }
+        if (g.assist_name && keyFor(g.assist_id, g.assist_name) === playerKey) {
+          assisted.push(g.minute);
+        }
+      }
+
+      let yellow: number | null = null;
+      let red: number | null = null;
+      for (const c of cards) {
+        if (c.team !== teamName) continue;
+        if (keyFor(c.player_id, c.player_name) !== playerKey) continue;
+        if (c.card_type === "YELLOW") yellow = yellow ?? c.minute;
+        else if (c.card_type === "RED" || c.card_type === "YELLOWRED") red = c.minute;
+      }
+
+      let subOn: number | null = null;
+      for (const s of subs) {
+        if (s.team !== teamName) continue;
+        if (keyFor(s.player_in_id, s.player_in) === playerKey) {
+          subOn = s.minute;
+          break;
+        }
+      }
+
+      return { goals: scored, assists: assisted, yellow, red, subOn };
+    };
+  }, [details, homeTeam, awayTeam]);
+
   return (
     <div className="space-y-6">
       {/* Watch Intervals */}
@@ -395,26 +564,35 @@ export default function MatchDetailClient({
 
       {details?.available && (
         <>
-          {/* Goals */}
-          {details.goals && details.goals.length > 0 && (
+          {/* Goals — chronological, home left / away right */}
+          {sortedGoals.length > 0 && (
             <div className={cardClass}>
               <h2 className="text-lg font-semibold text-white mb-4">Goals</h2>
-              <div className="space-y-2">
-                {details.goals.map((goal, i) => (
-                  <div key={i} className="flex items-center gap-3 text-sm">
-                    <span className="text-accent font-bold tabular-nums w-8 text-right">{goal.minute}&apos;</span>
-                    <div className="flex-1">
-                      <PlayerName id={goal.scorer_id} name={goal.scorer_name} className="text-white font-medium" />
-                      {goal.assist_name && (
-                        <span className="text-muted ml-1.5">
-                          (assist: <PlayerName id={goal.assist_id} name={goal.assist_name} className="text-muted" inline />)
-                        </span>
-                      )}
-                      <GoalTypeIcon type={goal.type} />
-                    </div>
-                    <span className="text-muted text-xs">{goal.team}</span>
-                  </div>
-                ))}
+              <TeamHeaderRow
+                homeTeam={homeTeam}
+                homeTeamId={resolvedHomeTeamId ?? null}
+                awayTeam={awayTeam}
+                awayTeamId={resolvedAwayTeamId ?? null}
+              />
+              <div className="space-y-2 mt-3">
+                {sortedGoals.map((goal, i) => {
+                  const isHome = goal.team === homeTeam;
+                  return (
+                    <EventRow key={i} minute={goal.minute} isHome={isHome}>
+                      <div className={`text-sm min-w-0 ${isHome ? "text-right" : "text-left"}`}>
+                        <div>
+                          <PlayerName id={goal.scorer_id} name={goal.scorer_name} className="text-white font-medium" />
+                          <GoalTypeIcon type={goal.type} />
+                        </div>
+                        {goal.assist_name && (
+                          <div className="text-muted text-xs">
+                            assist: <PlayerName id={goal.assist_id} name={goal.assist_name} className="text-muted" inline />
+                          </div>
+                        )}
+                      </div>
+                    </EventRow>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -444,35 +622,104 @@ export default function MatchDetailClient({
             </div>
           )}
 
-          {/* Substitutions — two columns, one team each */}
-          {details.substitutions && details.substitutions.length > 0 && (
+          {/* Substitutions — chronological, home left / away right */}
+          {sortedSubs.length > 0 && (
             <div className={cardClass}>
               <h2 className="text-lg font-semibold text-white mb-4">Substitutions</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <SubColumn teamName={homeTeam} teamId={resolvedHomeTeamId ?? null} subs={homeSubs} />
-                <SubColumn teamName={awayTeam} teamId={resolvedAwayTeamId ?? null} subs={awaySubs} />
+              <TeamHeaderRow
+                homeTeam={homeTeam}
+                homeTeamId={resolvedHomeTeamId ?? null}
+                awayTeam={awayTeam}
+                awayTeamId={resolvedAwayTeamId ?? null}
+              />
+              <div className="space-y-2 mt-3">
+                {sortedSubs.map((sub, i) => {
+                  const isHome = sub.team === homeTeam;
+                  return (
+                    <EventRow key={i} minute={sub.minute} isHome={isHome}>
+                      <div className="text-sm min-w-0">
+                        <div className={`flex items-center gap-1.5 text-green-400 ${isHome ? "justify-end" : "justify-start"}`}>
+                          <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                          </svg>
+                          <PlayerName id={sub.player_in_id} name={sub.player_in} className="text-green-400 truncate" />
+                        </div>
+                        <div className={`flex items-center gap-1.5 text-red-400 ${isHome ? "justify-end" : "justify-start"}`}>
+                          <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          <PlayerName id={sub.player_out_id} name={sub.player_out} className="text-red-400 truncate" />
+                        </div>
+                      </div>
+                    </EventRow>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* Cards */}
-          {details.cards && details.cards.length > 0 && (
+          {/* Cards — chronological, home left / away right */}
+          {sortedCards.length > 0 && (
             <div className={cardClass}>
               <h2 className="text-lg font-semibold text-white mb-4">Cards</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <CardColumn teamName={homeTeam} teamId={resolvedHomeTeamId ?? null} cards={homeCards} />
-                <CardColumn teamName={awayTeam} teamId={resolvedAwayTeamId ?? null} cards={awayCards} />
+              <TeamHeaderRow
+                homeTeam={homeTeam}
+                homeTeamId={resolvedHomeTeamId ?? null}
+                awayTeam={awayTeam}
+                awayTeamId={resolvedAwayTeamId ?? null}
+              />
+              <div className="space-y-2 mt-3">
+                {sortedCards.map((c, i) => {
+                  const isHome = c.team === homeTeam;
+                  const inner = (
+                    <span className={`flex items-center gap-2 text-sm ${isHome ? "justify-end" : "justify-start"}`}>
+                      <span className={`w-2.5 h-3.5 rounded-[1px] shrink-0 ${cardColor(c.card_type)}`} />
+                      <span className="text-slate-200 truncate">{c.player_name}</span>
+                      <span className="text-muted text-xs">({cardLabel(c.card_type)})</span>
+                    </span>
+                  );
+                  return (
+                    <EventRow key={i} minute={c.minute} isHome={isHome}>
+                      {c.player_id != null ? (
+                        <Link href={`/players/${c.player_id}`} className="hover:text-accent transition-colors block min-w-0">
+                          {inner}
+                        </Link>
+                      ) : (
+                        <div className="min-w-0">{inner}</div>
+                      )}
+                    </EventRow>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* Benches */}
+          {/* Benches — same chronological-style layout as Goals/Subs/Cards, with home left / away right */}
           {(homeBench.length > 0 || awayBench.length > 0) && (
             <div className={cardClass}>
               <h2 className="text-lg font-semibold text-white mb-4">Benches</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <BenchList players={homeBench} label={homeTeam} />
-                <BenchList players={awayBench} label={awayTeam} />
+              <TeamHeaderRow
+                homeTeam={homeTeam}
+                homeTeamId={resolvedHomeTeamId ?? null}
+                awayTeam={awayTeam}
+                awayTeamId={resolvedAwayTeamId ?? null}
+              />
+              <div className="space-y-2 mt-3">
+                {Array.from({ length: Math.max(homeBench.length, awayBench.length) }).map((_, i) => {
+                  const home = homeBench[i] ?? null;
+                  const away = awayBench[i] ?? null;
+                  return (
+                    <div key={i} className="grid grid-cols-[1fr_auto_1fr] items-start gap-3">
+                      <div className="min-w-0 flex justify-end">
+                        {home && <BenchPlayerEntry player={home} annotations={getBenchAnnotations(home, "home")} side="home" />}
+                      </div>
+                      <span className="w-10" />
+                      <div className="min-w-0 flex justify-start">
+                        {away && <BenchPlayerEntry player={away} annotations={getBenchAnnotations(away, "away")} side="away" />}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -579,112 +826,81 @@ function PlayerName({
   return <Tag className={className}>{name}</Tag>;
 }
 
-function TeamHeading({ teamName, teamId }: { teamName: string; teamId: number | null }) {
-  const header = (
-    <h3 className="text-sm font-semibold text-accent mb-3 flex items-center gap-2">
-      {teamId != null && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={`https://media.api-sports.io/football/teams/${teamId}.png`}
-          alt={teamName}
-          className="w-5 h-5 object-contain"
-        />
-      )}
-      {teamName}
-    </h3>
+function EventRow({
+  minute,
+  isHome,
+  children,
+}: {
+  minute: number;
+  isHome: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+      <div className={`min-w-0 flex ${isHome ? "justify-end" : ""}`}>
+        {isHome && children}
+      </div>
+      <span className="tabular-nums font-bold text-sm w-10 text-center text-accent">
+        {minute}&apos;
+      </span>
+      <div className={`min-w-0 flex ${!isHome ? "justify-start" : ""}`}>
+        {!isHome && children}
+      </div>
+    </div>
   );
+}
+
+function TeamHeaderRow({
+  homeTeam,
+  homeTeamId,
+  awayTeam,
+  awayTeamId,
+}: {
+  homeTeam: string;
+  homeTeamId: number | null;
+  awayTeam: string;
+  awayTeamId: number | null;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-3 border-b border-card-border/50">
+      <div className="flex justify-end min-w-0">
+        <TeamLink teamName={homeTeam} teamId={homeTeamId} crestSide="right" />
+      </div>
+      <span className="w-10" />
+      <div className="flex justify-start min-w-0">
+        <TeamLink teamName={awayTeam} teamId={awayTeamId} crestSide="left" />
+      </div>
+    </div>
+  );
+}
+
+function TeamLink({
+  teamName,
+  teamId,
+  crestSide,
+}: {
+  teamName: string;
+  teamId: number | null;
+  crestSide: "left" | "right";
+}) {
+  const crest =
+    teamId != null ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={`https://media.api-sports.io/football/teams/${teamId}.png`}
+        alt={teamName}
+        className="w-7 h-7 object-contain shrink-0"
+      />
+    ) : null;
+  const label = <span className="text-base font-semibold text-accent truncate">{teamName}</span>;
+  const inner = crestSide === "left" ? (<>{crest}{label}</>) : (<>{label}{crest}</>);
+  const cls = "flex items-center gap-2 min-w-0";
   if (teamId != null) {
     return (
-      <Link href={`/teams/${teamId}`} className="hover:text-accent transition-colors block">
-        {header}
+      <Link href={`/teams/${teamId}`} className={`${cls} hover:opacity-80 transition-opacity`}>
+        {inner}
       </Link>
     );
   }
-  return header;
-}
-
-function SubColumn({
-  teamName,
-  teamId,
-  subs,
-}: {
-  teamName: string;
-  teamId: number | null;
-  subs: Substitution[];
-}) {
-  return (
-    <div>
-      <TeamHeading teamName={teamName} teamId={teamId} />
-      {subs.length === 0 ? (
-        <p className="text-muted text-sm">No substitutions</p>
-      ) : (
-        <div className="space-y-2">
-          {subs.map((sub, i) => (
-            <div key={i} className="flex items-center gap-3 text-sm">
-              <span className="text-muted font-bold tabular-nums w-8 text-right">{sub.minute}&apos;</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 text-green-400">
-                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                  </svg>
-                  <PlayerName id={sub.player_in_id} name={sub.player_in} className="text-green-400 truncate" />
-                </div>
-                <div className="flex items-center gap-1.5 text-red-400">
-                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                  <PlayerName id={sub.player_out_id} name={sub.player_out} className="text-red-400 truncate" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CardColumn({
-  teamName,
-  teamId,
-  cards,
-}: {
-  teamName: string;
-  teamId: number | null;
-  cards: Card[];
-}) {
-  return (
-    <div>
-      <TeamHeading teamName={teamName} teamId={teamId} />
-      {cards.length === 0 ? (
-        <p className="text-muted text-sm">No cards</p>
-      ) : (
-        <div className="space-y-2">
-          {cards.map((c, i) => {
-            const content = (
-              <span className="flex items-center gap-2 text-sm">
-                <span className={`w-2.5 h-3.5 rounded-[1px] shrink-0 ${cardColor(c.card_type)}`} />
-                <span className="text-slate-200 truncate">{c.player_name}</span>
-                <span className="text-muted text-xs">({cardLabel(c.card_type)})</span>
-              </span>
-            );
-            return (
-              <div key={i} className="flex items-center gap-3">
-                <span className="text-muted font-bold tabular-nums w-8 text-right text-sm">{c.minute}&apos;</span>
-                <div className="flex-1 min-w-0">
-                  {c.player_id != null ? (
-                    <Link href={`/players/${c.player_id}`} className="hover:text-accent transition-colors block">
-                      {content}
-                    </Link>
-                  ) : (
-                    content
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+  return <div className={cls}>{inner}</div>;
 }

@@ -11,6 +11,7 @@ import PagedMatchList, { type PagedMatchItem } from "@/components/PagedMatchList
 import SectionHeader from "@/components/SectionHeader";
 import RankLine from "@/components/RankLine";
 import { getPlayerRank } from "@/lib/rank";
+import { formatPosition } from "@/lib/format-position";
 
 export const dynamic = "force-dynamic";
 
@@ -192,13 +193,14 @@ function HeaderChips({
     );
   }
 
-  if (header.position) {
+  const positionLabel = formatPosition(header.position);
+  if (positionLabel) {
     chips.push(
       <span
         key="pos"
         className="px-2.5 py-1 rounded-full bg-surface border border-card-border text-xs text-slate-200"
       >
-        {header.position}
+        {positionLabel}
       </span>
     );
   }
