@@ -1,6 +1,7 @@
 import { getMatch, getCoaches, setMatchVenueId } from "@/lib/db";
 import { hydrateMatchDetails } from "@/lib/match-hydration";
 import { searchVenuesApi } from "@/lib/football-api";
+import { formatRound } from "@/lib/format-round";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import MatchDetailClient from "./MatchDetailClient";
@@ -141,7 +142,7 @@ export default async function MatchDetailPage({
               </span>
             )
           )}
-          {match.round && <span>{match.round}</span>}
+          {formatRound(match.round) && <span>{formatRound(match.round)}</span>}
           {match.venue && (
             <Link
               href={

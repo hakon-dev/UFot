@@ -1,11 +1,64 @@
-import { getAllMatches } from "@/lib/db";
+import { getAllMatches, upsertCompetition, setMatchCompetitionId } from "@/lib/db";
+import { enrichCompetitionRecordsWithDetails } from "@/lib/competition-stats";
+import { searchLeaguesApi } from "@/lib/football-api";
+import { countryNameToCode } from "@/lib/country-codes";
 import HomeMatchFeed from "@/components/HomeMatchFeed";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
-  const matches = getAllMatches();
+export default async function Home() {
+  let matches = getAllMatches();
+
+  // Backfill competition logos for matches whose competition row isn't in the local cache yet.
+  // Without this only competitions warmed by /stats or search render a logo on the feed card.
+  const missingCompIds = new Set<number>();
+  for (const m of matches) {
+    if (m.competition_id != null && !m.competition_logo) missingCompIds.add(m.competition_id);
+  }
+  if (missingCompIds.size > 0) {
+    await enrichCompetitionRecordsWithDetails(
+      Array.from(missingCompIds).map((id) => ({
+        competitionId: id,
+        logo: null,
+        country: null,
+        countryCode: null,
+      }))
+    );
+    matches = getAllMatches();
+  }
+
+  // Edge case: matches whose competition_id is still NULL because the v13 migration didn't find
+  // a name-match in the competitions cache (e.g. "La Liga" before the user ever searched it).
+  // Resolve via /leagues?search=NAME, upsert, and assign the id back to the matches.
+  const unmatchedNames = new Set<string>();
+  for (const m of matches) {
+    if (m.competition_id == null && m.competition) unmatchedNames.add(m.competition);
+  }
+  if (unmatchedNames.size > 0) {
+    let didUpdate = false;
+    await Promise.all(
+      Array.from(unmatchedNames).slice(0, 10).map(async (name) => {
+        try {
+          const hits = await searchLeaguesApi(name);
+          const exact = hits.find((h) => h.name.toLowerCase() === name.toLowerCase()) ?? hits[0];
+          if (!exact) return;
+          upsertCompetition({
+            id: exact.id,
+            name: exact.name,
+            country: exact.country,
+            countryCode: exact.country ? countryNameToCode(exact.country) : null,
+            logo: exact.logo,
+          });
+          setMatchCompetitionId(name, exact.id);
+          didUpdate = true;
+        } catch {
+          // best-effort
+        }
+      })
+    );
+    if (didUpdate) matches = getAllMatches();
+  }
 
   return (
     <div>

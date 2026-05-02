@@ -73,12 +73,14 @@ export default async function CompetitionPage({
       <div className={cardClass}>
         <div className="flex items-center gap-4 flex-wrap">
           {competition.logo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={competition.logo}
-              alt={competition.name}
-              className="w-16 h-16 object-contain"
-            />
+            <div className="w-16 h-16 rounded-lg bg-white/90 p-2 flex items-center justify-center shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={competition.logo}
+                alt={competition.name}
+                className="w-full h-full object-contain"
+              />
+            </div>
           ) : (
             <div className="w-16 h-16 rounded-lg bg-surface ring-1 ring-card-border" />
           )}

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Match } from "@/lib/db";
+import { formatRound } from "@/lib/format-round";
 
 function TeamCrest({ src, alt }: { src: string | null; alt: string }) {
   if (src) {
@@ -10,19 +11,35 @@ function TeamCrest({ src, alt }: { src: string | null; alt: string }) {
       <img
         src={src}
         alt={alt}
-        className="w-8 h-8 object-contain"
+        className="w-12 h-12 object-contain shrink-0"
       />
     );
   }
 
-  // Placeholder shield icon
   return (
     <svg
-      className="w-8 h-8 text-muted/50"
+      className="w-12 h-12 text-muted/50 shrink-0"
       viewBox="0 0 24 24"
       fill="currentColor"
     >
       <path d="M12 2L3 7v5c0 5.25 3.83 10.15 9 11.25C17.17 22.15 21 17.25 21 12V7l-9-5zm0 2.18l7 3.89v4.93c0 4.29-3.08 8.28-7 9.18-3.92-.9-7-4.89-7-9.18V8.07l7-3.89z" />
+    </svg>
+  );
+}
+
+function StadiumIcon() {
+  return (
+    <svg
+      className="w-3.5 h-3.5 shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 22s7-7.5 7-13a7 7 0 1 0-14 0c0 5.5 7 13 7 13z" />
+      <circle cx="12" cy="9" r="2.5" />
     </svg>
   );
 }
@@ -59,80 +76,101 @@ export default function MatchCard({ match }: { match: Match }) {
   // The card is split into a main Link covering the score/teams area and sibling Links for the
   // competition badge — nesting <a> inside <a> is invalid HTML, so the outer wrapper is a div.
   return (
-    <div className="block bg-card rounded-xl p-5 border border-card-border hover:border-card-hover transition-colors group">
+    <div className="block bg-card rounded-xl p-6 border border-card-border hover:border-card-hover transition-colors group">
       <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 space-y-3">
-          <Link href={`/matches/${match.id}`} className="block space-y-3">
-            {/* Descriptive text */}
-            <p className="text-muted text-sm">
+        <div className="flex-1 min-w-0 space-y-5">
+          <Link href={`/matches/${match.id}`} className="block space-y-4">
+            {/* Watch description */}
+            <p className="text-muted text-base">
               {minutes >= 90 ? "You watched the full match" : `You watched ${minutes} min`} on <span className="text-slate-300">{dateStr}</span>
-              <span className="ml-2 inline-flex items-center bg-accent-muted text-accent-dim px-1.5 py-0.5 rounded text-xs tabular-nums">
-                {minutes}&apos;
-              </span>
             </p>
 
-            {/* Teams with crests and score */}
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                <TeamCrest src={match.home_crest} alt={match.home_team} />
-                <span className={`font-semibold text-lg truncate ${match.home_score > match.away_score ? "text-accent" : "text-slate-200"}`}>
+            {/* Teams centered with bigger crests */}
+            <div className="flex items-center gap-5">
+              <div className="flex items-center gap-3 flex-1 min-w-0 justify-end">
+                <span className={`font-semibold text-xl truncate text-right ${match.home_score > match.away_score ? "text-accent" : "text-slate-200"}`}>
                   {match.home_team}
                 </span>
+                <TeamCrest src={match.home_crest} alt={match.home_team} />
               </div>
 
-              <div className="text-2xl font-bold text-white tabular-nums shrink-0 px-2">
+              <div className="text-3xl font-bold text-white tabular-nums shrink-0">
                 {match.home_score} - {match.away_score}
               </div>
 
-              <div className="flex items-center gap-2.5 flex-1 min-w-0 justify-end">
-                <span className={`font-semibold text-lg truncate text-right ${match.away_score > match.home_score ? "text-accent" : "text-slate-200"}`}>
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <TeamCrest src={match.away_crest} alt={match.away_team} />
+                <span className={`font-semibold text-xl truncate ${match.away_score > match.home_score ? "text-accent" : "text-slate-200"}`}>
                   {match.away_team}
                 </span>
-                <TeamCrest src={match.away_crest} alt={match.away_team} />
               </div>
             </div>
           </Link>
 
-          {/* Metadata */}
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+          {/* Competition + round + venue + in-person */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             {match.competition && (
               match.competition_id != null ? (
                 <Link
                   href={`/competitions/${match.competition_id}`}
-                  className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full hover:text-accent transition-colors"
+                  className="inline-flex items-center gap-1.5 bg-accent-muted text-accent-dim pl-1 pr-2 py-0.5 rounded-full hover:text-accent transition-colors"
                 >
+                  {match.competition_logo && (
+                    <img
+                      src={match.competition_logo}
+                      alt=""
+                      className="w-4 h-4 object-contain bg-white/90 rounded-full p-0.5"
+                    />
+                  )}
                   {match.competition}
                 </Link>
               ) : (
-                <span className="bg-accent-muted text-accent-dim px-2 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1.5 bg-accent-muted text-accent-dim pl-1 pr-2 py-0.5 rounded-full">
+                  {match.competition_logo && (
+                    <img
+                      src={match.competition_logo}
+                      alt=""
+                      className="w-4 h-4 object-contain bg-white/90 rounded-full p-0.5"
+                    />
+                  )}
                   {match.competition}
                 </span>
               )
             )}
-            {match.round && <span>{match.round}</span>}
-            {match.venue && (
-              match.venue_id != null ? (
-                <Link
-                  href={`/stadiums/${match.venue_id}`}
-                  className="hover:text-accent transition-colors"
-                >
-                  {match.venue}
-                </Link>
-              ) : (
-                <span>{match.venue}</span>
-              )
-            )}
-            {match.watched_in_person === 1 && (
-              <span className="uppercase tracking-wide text-[10px] font-semibold px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
-                In person
-              </span>
+            {formatRound(match.round) && <span className="text-muted">{formatRound(match.round)}</span>}
+
+            {(match.venue || match.watched_in_person === 1) && (
+              <div className="ml-auto inline-flex items-center gap-2">
+                {match.venue && (
+                  match.venue_id != null ? (
+                    <Link
+                      href={`/stadiums/${match.venue_id}`}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-card-border bg-surface text-slate-200 hover:text-accent hover:border-accent/40 transition-colors"
+                    >
+                      <StadiumIcon />
+                      {match.venue}
+                    </Link>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-card-border bg-surface text-slate-200">
+                      <StadiumIcon />
+                      {match.venue}
+                    </span>
+                  )
+                )}
+                {match.watched_in_person === 1 && (
+                  <span className="uppercase tracking-wide text-[10px] font-semibold px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+                    In person
+                  </span>
+                )}
+              </div>
             )}
           </div>
+
         </div>
 
         <button
           onClick={handleDelete}
-          className="text-muted/40 hover:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100"
+          className="text-muted/40 hover:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100 shrink-0"
           aria-label="Delete match"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { getCompetitionSortKey } from "@/lib/competition-order";
+import { formatRound } from "@/lib/format-round";
 
 interface MatchSearchResult {
   id: number;
@@ -232,13 +233,15 @@ export default function MatchBrowser() {
           {/* Competition header */}
           <div className="flex items-center gap-2.5 mb-2 sticky top-0 bg-background/80 backdrop-blur-sm py-2 z-10">
             {group.emblem && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={group.emblem}
-                alt=""
-                className="w-5 h-5 object-contain"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              />
+              <div className="w-5 h-5 rounded bg-white/90 p-0.5 flex items-center justify-center shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={group.emblem}
+                  alt=""
+                  className="w-full h-full object-contain"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              </div>
             )}
             <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">
               {group.name}
@@ -324,7 +327,7 @@ export default function MatchBrowser() {
                   {/* Round / venue info */}
                   {(match.round || match.venue) && (
                     <div className="text-xs text-muted mt-1 pl-1">
-                      {[match.round, match.venue].filter(Boolean).join(" · ")}
+                      {[formatRound(match.round), match.venue].filter(Boolean).join(" · ")}
                     </div>
                   )}
                 </Link>

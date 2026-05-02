@@ -524,6 +524,41 @@ if (userVersion < 12) {
   db.pragma("user_version = 12");
 }
 
+// v13: backfill matches.competition_id from matches.competition (text name) for legacy rows.
+// Older matches predate the competition_id column and only carry the competition name. The
+// home-feed JOIN keys on competition_id, so without this migration their cards never render
+// a competition logo (only the few most recent matches do). Picks the candidate with the most
+// existing competition_id matches under that name as a popularity tiebreaker (so "Premier
+// League" → 39/England wins over 368/Singapore); falls back to lowest id when nothing in the
+// DB references either candidate yet.
+if (userVersion < 13) {
+  const orphans = db
+    .prepare(
+      `SELECT DISTINCT competition FROM matches
+       WHERE competition_id IS NULL AND competition IS NOT NULL`
+    )
+    .all() as { competition: string }[];
+
+  for (const { competition } of orphans) {
+    const candidates = db
+      .prepare(
+        `SELECT c.id, COUNT(m.id) AS uses
+         FROM competitions c
+         LEFT JOIN matches m ON m.competition_id = c.id
+         WHERE c.name = ?
+         GROUP BY c.id
+         ORDER BY uses DESC, c.id ASC`
+      )
+      .all(competition) as { id: number; uses: number }[];
+    if (candidates.length === 0) continue;
+    const winner = candidates[0].id;
+    db.prepare(
+      "UPDATE matches SET competition_id = ? WHERE competition_id IS NULL AND competition = ?"
+    ).run(winner, competition);
+  }
+  db.pragma("user_version = 13");
+}
+
 // NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null
 // home_formation or any sub with null player_in_id and purged the match's details so the
 // next visit would re-fetch. It was a bug: the API legitimately returns null for these
@@ -566,6 +601,7 @@ export interface Match {
   away_coach_id: number | null;
   away_coach_name: string | null;
   venue_search_attempted: number;
+  competition_logo?: string | null;
 }
 
 export interface MatchGoal {
@@ -614,7 +650,14 @@ export interface MatchCard {
 }
 
 export function getAllMatches(): Match[] {
-  return db.prepare("SELECT * FROM matches ORDER BY date DESC, created_at DESC").all() as Match[];
+  return db
+    .prepare(
+      `SELECT m.*, c.logo AS competition_logo
+       FROM matches m
+       LEFT JOIN competitions c ON c.id = m.competition_id
+       ORDER BY m.date DESC, m.created_at DESC`
+    )
+    .all() as Match[];
 }
 
 export function getMatch(id: string): Match | undefined {
@@ -688,6 +731,12 @@ export function setMatchVenueId(matchId: string, venueId: number | null): void {
   db.prepare(
     "UPDATE matches SET venue_id = COALESCE(?, venue_id), venue_search_attempted = 1 WHERE id = ?"
   ).run(venueId, matchId);
+}
+
+export function setMatchCompetitionId(competitionName: string, competitionId: number): void {
+  db.prepare(
+    "UPDATE matches SET competition_id = ? WHERE competition_id IS NULL AND competition = ?"
+  ).run(competitionId, competitionName);
 }
 
 export function getMatchesByVenueId(venueId: number): Match[] {

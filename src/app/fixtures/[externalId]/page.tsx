@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import WatchIntervalEditor from "@/components/WatchIntervalEditor";
+import { formatRound } from "@/lib/format-round";
 
 interface MatchSearchResult {
   id: number;
@@ -165,7 +166,7 @@ export default function FixturePreviewPage() {
       <div className={cardClass}>
         <div className="text-xs text-muted uppercase tracking-wide mb-2">
           {summary.competition}
-          {summary.round ? ` · ${summary.round}` : ""}
+          {formatRound(summary.round) ? ` · ${formatRound(summary.round)}` : ""}
         </div>
         <div className="flex items-center gap-4">
           <div className="flex-1 flex items-center gap-3 justify-end min-w-0">

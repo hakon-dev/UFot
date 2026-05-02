@@ -130,8 +130,10 @@ export default function CompetitionStatsTable({
               const cellInner = (
                 <div className="flex items-center gap-2.5 min-w-0">
                   {c.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={c.logo} alt="" className="w-5 h-5 object-contain shrink-0" />
+                    <div className="w-5 h-5 rounded bg-white/90 p-0.5 flex items-center justify-center shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={c.logo} alt="" className="w-full h-full object-contain" />
+                    </div>
                   ) : (
                     <div className="w-5 h-5 shrink-0" />
                   )}
