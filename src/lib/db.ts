@@ -586,6 +586,24 @@ if (userVersion < 14) {
   db.pragma("user_version = 14");
 }
 
+// v15: undo bad rescue assignments where competition_id was set to a non-priority
+// homonym. The earlier home-page rescue picked the first exact-name hit from
+// /leagues?search=, so generic cup names ("League Cup", "FA Cup") got assigned to
+// whichever country API-Football returned first — Singapore's "League Cup" (id 505)
+// rather than England's EFL Cup (id 48). Reset those matches to NULL and drop the
+// orphan cache rows; the new disambiguating rescue (page.tsx, prefers
+// COMPETITION_PRIORITY) re-resolves them on the next home-page render.
+if (userVersion < 15) {
+  db.exec(`
+    UPDATE matches SET competition_id = NULL
+    WHERE competition_id IN (
+      SELECT id FROM competitions WHERE id = 505
+    )
+  `);
+  db.prepare("DELETE FROM competitions WHERE id = 505").run();
+  db.pragma("user_version = 15");
+}
+
 // NOTE: A prior "schema-drift re-hydrate" block lived here that checked for null
 // home_formation or any sub with null player_in_id and purged the match's details so the
 // next visit would re-fetch. It was a bug: the API legitimately returns null for these
