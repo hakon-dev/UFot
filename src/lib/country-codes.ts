@@ -1,0 +1,204 @@
+// Country name → ISO 3166-1 alpha-2 (lowercase) for building flag URLs via flagcdn.com.
+// flagcdn supports UK home-nation subdivisions (gb-eng/gb-sct/gb-wls/gb-nir) which the
+// api-sports.io flag service does not. Covers common football nations; extend as needed.
+const COUNTRY_CODES: Record<string, string> = {
+  "Afghanistan": "af",
+  "Albania": "al",
+  "Algeria": "dz",
+  "Andorra": "ad",
+  "Angola": "ao",
+  "Argentina": "ar",
+  "Armenia": "am",
+  "Australia": "au",
+  "Austria": "at",
+  "Azerbaijan": "az",
+  "Bahrain": "bh",
+  "Belarus": "by",
+  "Belgium": "be",
+  "Benin": "bj",
+  "Bolivia": "bo",
+  "Bosnia": "ba",
+  "Bosnia and Herzegovina": "ba",
+  "Brazil": "br",
+  "Bulgaria": "bg",
+  "Burkina Faso": "bf",
+  "Cameroon": "cm",
+  "Canada": "ca",
+  "Cape Verde": "cv",
+  "Chile": "cl",
+  "China": "cn",
+  "China PR": "cn",
+  "Colombia": "co",
+  "Congo": "cg",
+  "Congo DR": "cd",
+  "Costa Rica": "cr",
+  "Croatia": "hr",
+  "Cuba": "cu",
+  "Curacao": "cw",
+  "Cyprus": "cy",
+  "Czech Republic": "cz",
+  "Czechia": "cz",
+  "Denmark": "dk",
+  "Dominican Republic": "do",
+  "DR Congo": "cd",
+  "Ecuador": "ec",
+  "Egypt": "eg",
+  "El Salvador": "sv",
+  "England": "gb-eng",
+  "Equatorial Guinea": "gq",
+  "Estonia": "ee",
+  "Ethiopia": "et",
+  "Faroe Islands": "fo",
+  "Finland": "fi",
+  "France": "fr",
+  "Gabon": "ga",
+  "Gambia": "gm",
+  "Georgia": "ge",
+  "Germany": "de",
+  "Ghana": "gh",
+  "Greece": "gr",
+  "Guatemala": "gt",
+  "Guinea": "gn",
+  "Guinea-Bissau": "gw",
+  "Haiti": "ht",
+  "Honduras": "hn",
+  "Hong Kong": "hk",
+  "Hungary": "hu",
+  "Iceland": "is",
+  "India": "in",
+  "Indonesia": "id",
+  "Iran": "ir",
+  "Iraq": "iq",
+  "Ireland": "ie",
+  "Republic of Ireland": "ie",
+  "Israel": "il",
+  "Italy": "it",
+  "Ivory Coast": "ci",
+  "Côte d'Ivoire": "ci",
+  "Jamaica": "jm",
+  "Japan": "jp",
+  "Jordan": "jo",
+  "Kazakhstan": "kz",
+  "Kenya": "ke",
+  "Kosovo": "xk",
+  "Kuwait": "kw",
+  "Latvia": "lv",
+  "Lebanon": "lb",
+  "Liberia": "lr",
+  "Libya": "ly",
+  "Liechtenstein": "li",
+  "Lithuania": "lt",
+  "Luxembourg": "lu",
+  "Macedonia": "mk",
+  "North Macedonia": "mk",
+  "Madagascar": "mg",
+  "Malaysia": "my",
+  "Mali": "ml",
+  "Malta": "mt",
+  "Mauritania": "mr",
+  "Mexico": "mx",
+  "Moldova": "md",
+  "Monaco": "mc",
+  "Montenegro": "me",
+  "Morocco": "ma",
+  "Mozambique": "mz",
+  "Netherlands": "nl",
+  "New Zealand": "nz",
+  "Nicaragua": "ni",
+  "Niger": "ne",
+  "Nigeria": "ng",
+  "North Korea": "kp",
+  "Northern Ireland": "gb-nir",
+  "Norway": "no",
+  "Oman": "om",
+  "Pakistan": "pk",
+  "Palestine": "ps",
+  "Panama": "pa",
+  "Paraguay": "py",
+  "Peru": "pe",
+  "Philippines": "ph",
+  "Poland": "pl",
+  "Portugal": "pt",
+  "Qatar": "qa",
+  "Romania": "ro",
+  "Russia": "ru",
+  "Rwanda": "rw",
+  "Saudi Arabia": "sa",
+  "Scotland": "gb-sct",
+  "Senegal": "sn",
+  "Serbia": "rs",
+  "Sierra Leone": "sl",
+  "Singapore": "sg",
+  "Slovakia": "sk",
+  "Slovenia": "si",
+  "South Africa": "za",
+  "South Korea": "kr",
+  "Korea Republic": "kr",
+  "Spain": "es",
+  "Sudan": "sd",
+  "Sweden": "se",
+  "Switzerland": "ch",
+  "Syria": "sy",
+  "Taiwan": "tw",
+  "Tanzania": "tz",
+  "Thailand": "th",
+  "Togo": "tg",
+  "Trinidad and Tobago": "tt",
+  "Tunisia": "tn",
+  "Turkey": "tr",
+  "Türkiye": "tr",
+  "Uganda": "ug",
+  "Ukraine": "ua",
+  "United Arab Emirates": "ae",
+  "United States": "us",
+  "USA": "us",
+  "Uruguay": "uy",
+  "Uzbekistan": "uz",
+  "Venezuela": "ve",
+  "Vietnam": "vn",
+  "Wales": "gb-wls",
+  "Yemen": "ye",
+  "Zambia": "zm",
+  "Zimbabwe": "zw",
+};
+
+export function countryNameToCode(name: string | null | undefined): string | null {
+  if (!name) return null;
+  return COUNTRY_CODES[name] ?? COUNTRY_CODES[name.trim()] ?? null;
+}
+
+// Reverse map: ISO2/subdivision code → canonical country name. Several names map to the same
+// code (e.g. "USA" and "United States" both → "us"); the first entry wins, which gives us the
+// most common display name for each code.
+const CODE_TO_COUNTRY: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const [name, code] of Object.entries(COUNTRY_CODES)) {
+    if (!(code in out)) out[code] = name;
+  }
+  return out;
+})();
+
+export function codeToCountryName(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return CODE_TO_COUNTRY[code.toLowerCase()] ?? null;
+}
+
+export function flagUrl(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return `https://flagcdn.com/${code}.svg`;
+}
+
+// Substring search over the canonical country names (one entry per code, so "USA"/"United States"
+// don't both show up). Case-insensitive; exact-prefix matches rank ahead of mid-string matches.
+export function searchCountries(q: string, limit = 6): { name: string; code: string }[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  const prefix: { name: string; code: string }[] = [];
+  const contains: { name: string; code: string }[] = [];
+  for (const [code, name] of Object.entries(CODE_TO_COUNTRY)) {
+    const lower = name.toLowerCase();
+    if (lower.startsWith(needle)) prefix.push({ name, code });
+    else if (lower.includes(needle)) contains.push({ name, code });
+  }
+  return [...prefix, ...contains].slice(0, limit);
+}
